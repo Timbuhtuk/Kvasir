@@ -1,74 +1,74 @@
-﻿using Discord.Commands;
+﻿using Application.Services;
+using Discord.Commands;
 
 
-namespace CS_Discord_Bot.Commands
+namespace CS_Discord_Bot.Commands;
+
+/// <summary>
+/// Class that represents Music commands for bot
+/// </summary>
+public class MusicCommands : ModuleBase<SocketCommandContext>
 {
-    /// <summary>
-    /// Class that represents Music commands for bot
-    /// </summary>
-    public class MusicCommands : ModuleBase<SocketCommandContext>
-    {
-        public MusicClientsContainer container;
+        public Application.Services.GuildService manager;
 
-        public MusicCommands(MusicClientsContainer mcc)
+        public MusicCommands(Application.Services.GuildService manager)
         {
-            container = mcc;
+            this.manager = manager;
         }
         [Command("play", RunMode = RunMode.Async)]
         [Summary("Play the selected song from YouTube")]
         [Alias("p", "з")]
         public async Task PlayAsync([Remainder] string query)
         {
-            await container.PlayAsync(Context, query);
+            await manager.PlayAsync(Context, query);
         }
         [Command("play", RunMode = RunMode.Async)]
         [Summary("Play the selected song from YouTube")]
         [Alias("p", "з")]
         public async Task PlayAsync()
         {
-            await container.PlayAsync(Context);
+            await manager.PlayAsync(Context);
         }
         [Command("pause")]
         [Summary("Pause the current song")]
         [Alias("pa", "зф")]
         public async Task PauseAsync()
         {
-            await container.PauseAsync(Context);
+            await manager.PauseAsync(Context);
         }
         [Command("resume")]
         [Summary("Resume the current song")]
         [Alias("r", "к")]
         public async Task ResumeAsync()
         {
-            await container.ResumeAsync(Context);
+            await manager.ResumeAsync(Context);
         }
         [Command("skip")]
         [Summary("Skip the current song")]
         [Alias("s", "ы")]
         public async Task SkipAsync()
         {
-            await container.SkipAsync(Context);
+            await manager.SkipAsync(Context);
         }
         [Command("clear")]
         [Summary("Clear the queue")]
         [Alias("c", "с")]
         public async Task ClearAsync()
         {
-            await container.ClearAsync(Context);
+            await manager.ClearAsync(Context);
         }
         [Command("leave")]
         [Summary("Disconnect bot from channel")]
         [Alias("l", "д")]
         public async Task LeaveAsync()
         {
-            await container.LeaveAsync(Context);
+            await manager.LeaveAsync(Context);
         }
         [Command("anchor")]
         [Summary("Set current text chat as primary for bot")]
         [Alias("фтсрщк")]
         public async Task AnchorAsync()
         {
-            await container.AnchorAsync(Context);
+            await manager.AnchorAsync(Context);
         }
-    }
 }
