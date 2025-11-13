@@ -61,7 +61,7 @@ public class VideoFinderService
             }
             catch (Exception ex)
             {
-                await Logger.AddLog(ex.Message, LogLevel.ERROR, exception: ex);
+                await Logger.AddLog(ex.Message, Microsoft.Extensions.Logging.LogLevel.Error, exception: ex);
                 return null;
             }
         }
@@ -87,7 +87,7 @@ public class VideoFinderService
             }
             catch (Exception ex)
             {
-                await Logger.AddLog(ex.Message, LogLevel.ERROR, exception: ex);
+                await Logger.AddLog(ex.Message, Microsoft.Extensions.Logging.LogLevel.Error, exception: ex);
                 return null;
             }
         }
@@ -106,7 +106,7 @@ public class VideoFinderService
             }
             catch (Exception ex)
             {
-                await Logger.AddLog(ex.Message, LogLevel.ERROR, exception: ex);
+                await Logger.AddLog(ex.Message, Microsoft.Extensions.Logging.LogLevel.Error, exception: ex);
                 return null;
             }
         }
@@ -206,7 +206,7 @@ public class VideoFinderService
             }
             catch (Exception ex)
             {
-                await Logger.AddLog(ex.Message, LogLevel.ERROR, exception: ex);
+                await Logger.AddLog(ex.Message, Microsoft.Extensions.Logging.LogLevel.Error, exception: ex);
                 return null;
             }
         }
@@ -238,7 +238,7 @@ public class VideoFinderService
             }
             catch (Exception ex)
             {
-                await Logger.AddLog(ex.Message, LogLevel.ERROR, exception: ex);
+                await Logger.AddLog(ex.Message, Microsoft.Extensions.Logging.LogLevel.Error, exception: ex);
                 return null;
             }
         }
@@ -257,7 +257,7 @@ public class VideoFinderService
             }
             catch (Exception ex)
             {
-                await Logger.AddLog(ex.Message, LogLevel.ERROR, exception: ex);
+                await Logger.AddLog(ex.Message, Microsoft.Extensions.Logging.LogLevel.Error, exception: ex);
                 return null;
             }
         }
@@ -356,7 +356,7 @@ public class VideoFinderService
             }
             catch (Exception ex)
             {
-                await Logger.AddLog(ex.Message, LogLevel.ERROR, exception: ex);
+                await Logger.AddLog(ex.Message, Microsoft.Extensions.Logging.LogLevel.Error, exception: ex);
                 return null;
             }
         }
@@ -433,7 +433,7 @@ public class VideoFinderService
             }
             catch (Exception ex)
             {
-                await Logger.AddLog(ex.Message, LogLevel.ERROR, exception: ex);
+                await Logger.AddLog(ex.Message, Microsoft.Extensions.Logging.LogLevel.Error, exception: ex);
                 return null;
             }
         }
@@ -494,7 +494,7 @@ public class VideoFinderService
             }
             catch (Exception ex)
             {
-                await Logger.AddLog(ex.Message, LogLevel.ERROR, exception: ex);
+                await Logger.AddLog(ex.Message, Microsoft.Extensions.Logging.LogLevel.Error, exception: ex);
                 return null;
             }
         }

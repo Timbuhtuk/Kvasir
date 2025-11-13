@@ -1,4 +1,5 @@
 using Entities.Enums;
+using Microsoft.Extensions.Logging;
 using System.Text.Json.Serialization;
 
 namespace Logging;
@@ -12,7 +13,7 @@ public class LogEntry
     public DateTime Timestamp { get; set; }
 
     [JsonPropertyName("level")]
-    public LogLevel Level { get; set; }
+    public Microsoft.Extensions.Logging.LogLevel Level { get; set; }
 
     [JsonPropertyName("category")]
     public LogCategory Category { get; set; }

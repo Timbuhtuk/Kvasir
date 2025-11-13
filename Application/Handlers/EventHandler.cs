@@ -1,11 +1,11 @@
-﻿using Application;
+﻿using Application.Interfaces;
 using Application.Services;
-using Logging;
-using CS_Discord_Bot.music_parts;
 using Discord;
 using Discord.WebSocket;
 using Entities.Enums;
+using Logging;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace CS_Discord_Bot.Handlers;
 
@@ -15,23 +15,23 @@ public class EventHandler
     protected readonly DiscordSocketClient _client;
     protected readonly GuildService _guildService;
     protected readonly IConfiguration _configuration;
+    protected readonly IServiceProvider _serviceProvider;
 
-    public EventHandler(DiscordSocketClient client, GuildService guildService, IConfiguration configuration)
+    public EventHandler(DiscordSocketClient client, GuildService guildService, IConfiguration configuration, IServiceProvider serviceProvider)
     {
         _client = client;
         _guildService = guildService;
         _configuration = configuration;
+        _serviceProvider = serviceProvider;
     }
 
-    public Task RegisterEventsAsync()
+    public async Task RegisterEventsAsync()
     {
         _client.MessageDeleted += MessageDeleted;
         _client.MessageReceived += MessageReceived;
         _client.ModalSubmitted += HandleModalAsync;
 
-        Logger.AddLog("Event handler registered");
-        return Task.CompletedTask;
-
+        await Logger.AddLog("Event handler registered");
     }
     protected async Task HandleModalAsync(SocketModal modal)
     {
@@ -50,10 +50,10 @@ public class EventHandler
                     await modal.DeferAsync();
                     List<SocketMessageComponentData> components = modal.Data.Components.ToList();
                     string playlist_name = components.First(x => x.CustomId == "playlist_name").Value;
-                    MusicClient? musicClient = _guildService.GetMusicClient(modal.GuildId ?? 0);
+                    MusicClientService? musicClient = _guildService.GetMusicClient(modal.GuildId ?? 0);
                     if (musicClient != null)
                     {
-                        Task.Run(() => musicClient.AddPlaylistAsync(playlist_name, modal.User.Id));
+                        _ = Task.Run(() => musicClient.AddPlaylistAsync(playlist_name, modal.User.Id));
                     }
                     break;
             }
@@ -73,14 +73,13 @@ public class EventHandler
 
         try
         {
-            MusicClient? music_client = _guildService.GetMusicClient(channel?.GuildId ?? 0);
-            IMessage message = await cacheable1.GetOrDownloadAsync();
-            if (music_client != null)
+            // Делегируем обработку в MusicViewService для каждой гильдии
+            if (channel?.GuildId != null)
             {
-                if (message != null && message.Id == music_client.view_message?.Id)
+                MusicClientService? music_client = _guildService.GetMusicClient(channel.GuildId);
+                if (music_client?.music_view != null)
                 {
-                    await music_client.SetViewMessage(null);
-                    await music_client.RerenderMusicViewAsync(new_msg: message);
+                    await music_client.music_view.HandleMessageDeletedAsync(cacheable1, cacheable2, _client.CurrentUser.Id);
                 }
             }
         }
@@ -102,20 +101,13 @@ public class EventHandler
 
         try
         {
-            MusicClient? music_client = _guildService.GetMusicClient(guildChannel?.GuildId ?? 0);
-            if (music_client != null)
+            // Делегируем обработку в MusicViewService для каждой гильдии
+            if (guildChannel?.GuildId != null)
             {
-                if (message.Content.StartsWith(_configuration["command_tag"]!))
+                MusicClientService? music_client = _guildService.GetMusicClient(guildChannel.GuildId);
+                if (music_client?.music_view != null)
                 {
-                    return;
-                }
-                if (message.Author.Id == _client.CurrentUser.Id && message.Content == ".")
-                {
-                    await music_client.SetViewMessage(message);
-                }
-                else
-                {
-                    await music_client.RerenderMusicViewAsync(new_msg: message);
+                    await music_client.music_view.HandleMessageReceivedAsync(message, _client.CurrentUser.Id, _configuration["command_tag"]!);
                 }
             }
         }
@@ -124,4 +116,5 @@ public class EventHandler
             LogContext.Clear();
         }
     }
+
 }

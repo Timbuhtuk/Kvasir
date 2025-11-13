@@ -1,12 +1,12 @@
-using CS_Discord_Bot.music_parts;
+using Application.Services;
 
 namespace Application.Interfaces;
 
 /// <summary>
-/// Factory interface for creating MusicView instances
+/// Factory interface for creating MusicViewService instances
 /// </summary>
 public interface IMusicViewFactory
 {
-    MusicView Create(MusicClient musicClient, ulong guildDiscordId);
+    MusicViewService Create(MusicClientService musicClient, ulong guildDiscordId);
 }
 

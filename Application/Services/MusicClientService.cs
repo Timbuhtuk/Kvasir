@@ -1,5 +1,4 @@
 ﻿using Application.Interfaces;
-using Application.Services;
 using Discord;
 using Discord.Audio;
 using Discord.Commands;
@@ -11,13 +10,12 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using System.Collections.Concurrent;
 using System.Diagnostics;
-using System.Text;
 
 
-namespace CS_Discord_Bot.music_parts;
+namespace Application.Services;
 
 [LogCategory(LogCategory.Music)]
-public class MusicClient : IAsyncDisposable
+public class MusicClientService : IAsyncDisposable
 {
     #region Constants
     private const int MAX_PLAYLIST_SIZE = 23;
@@ -56,15 +54,14 @@ public class MusicClient : IAsyncDisposable
 
     protected Process? ffmpeg;
 
-    public MusicView? music_view { get; protected set; }
-    public IMessage? view_message { get; protected set; }
+    public MusicViewService? music_view { get; protected set; }
 
-    public System.Threading.Timer MainLoop { get; protected set; }
+    public Timer MainLoop { get; protected set; }
 
-    protected static readonly SemaphoreSlim _semaphoreSlim = new(1, 1);
+    public event Func<Task>? ViewUpdateRequested;
     #endregion
 
-    public MusicClient(
+    public MusicClientService(
         Guild guild,
         IServiceScopeFactory serviceScopeFactory,
         DiscordSocketClient discordClient,
@@ -79,14 +76,18 @@ public class MusicClient : IAsyncDisposable
         music_queue = new ConcurrentQueue<KeyValuePair<IVoiceChannel, Song>>();
         saved_music = new List<Playlist>() { playback_history };
         _audioDownloader = audioDownloader;
-        
-        // Создаем MusicView через scope (scoped сервис)
+
+        // Создаем MusicViewService через scope (scoped сервис)
         // Репозитории будут автоматически инжектированы из scope
-        music_view = Microsoft.Extensions.DependencyInjection.ActivatorUtilities.CreateInstance<MusicView>(
+        music_view = ActivatorUtilities.CreateInstance<MusicViewService>(
             serviceProvider,
             this,
             serviceScopeFactory,
-            guild.DiscordId);
+            guild.DiscordId,
+            discordClient);
+
+        // Подписываем метод обновления вьюшки на событие
+        ViewUpdateRequested += music_view.UpdateMusicViewAsync;
 
         is_playing = false;
         is_paused = false;
@@ -102,7 +103,7 @@ public class MusicClient : IAsyncDisposable
 
         this.guild = _guildRepository.GetByDiscordIdAsync(guild.DiscordId).Result ?? guild;
 
-        // Устанавливаем контекст гильдии для всех логов этого MusicClient
+        // Устанавливаем контекст гильдии для всех логов этого MusicClientService
         LogContext.SetGuild(this.guild.DiscordId, this.guild.Name);
 
         MainLoop = new System.Threading.Timer(AfterConstructCallback, null, 0, MAIN_LOOP_INTERVAL_MS);
@@ -119,11 +120,11 @@ public class MusicClient : IAsyncDisposable
         {
             await UpdateLikedMusicAsync();
             await UpdatePopularSongsAsync();
-            await RerenderMusicViewAsync();
+            await music_view!.RerenderMusicViewAsync();
         }
         catch (Exception ex)
         {
-            await Logger.AddLog($"Error in AfterConstructAsync: {ex.Message}", LogLevel.ERROR);
+            await Logger.AddLog($"Error in AfterConstructAsync: {ex.Message}", Microsoft.Extensions.Logging.LogLevel.Error);
         }
     }
 
@@ -229,7 +230,7 @@ public class MusicClient : IAsyncDisposable
             catch (Exception e)
             {
                 // guildId и guildName автоматически берутся из LogContext
-                await Logger.AddLog(e.Message, LogLevel.ERROR, exception: e);
+                await Logger.AddLog(e.Message, Microsoft.Extensions.Logging.LogLevel.Error, exception: e);
                 return;
             }
 
@@ -259,7 +260,7 @@ public class MusicClient : IAsyncDisposable
                 current_song = music_queue.First();
             }
 
-            await UpdateMusicViewAsync();
+            await RequestedViewUpdateAsync();
             await UpdatePlayHistoryAsync();
 
             try
@@ -291,11 +292,11 @@ public class MusicClient : IAsyncDisposable
             }
             catch (OperationCanceledException ex)
             {
-                await Logger.AddLog($"CanceledException during playback: {ex.Message}", LogLevel.WARNING);
+                await Logger.AddLog($"CanceledException during playback: {ex.Message}", Microsoft.Extensions.Logging.LogLevel.Warning);
             }
             catch (Exception ex)
             {
-                await Logger.AddLog($"Error during playback: {ex.Message}", LogLevel.ERROR);
+                await Logger.AddLog($"Error during playback: {ex.Message}", Microsoft.Extensions.Logging.LogLevel.Error);
             }
             finally
             {
@@ -308,7 +309,7 @@ public class MusicClient : IAsyncDisposable
         }
         else if (!is_playing && !is_paused && music_queue.Count == 0)
         {
-            await UpdateMusicViewAsync();
+            await RequestedViewUpdateAsync();
             await LeaveAsync();
         }
     }
@@ -329,7 +330,7 @@ public class MusicClient : IAsyncDisposable
     {
         if (voiceChannel == null)
         {
-            await Logger.AddLog("User not in voice chat", LogLevel.WARNING);
+            await Logger.AddLog("User not in voice chat", Microsoft.Extensions.Logging.LogLevel.Warning);
             return;
         }
 
@@ -374,7 +375,7 @@ public class MusicClient : IAsyncDisposable
     {
         if (voiceChannel == null)
         {
-            await Logger.AddLog("User not in voice chat", LogLevel.WARNING);
+            await Logger.AddLog("User not in voice chat", Microsoft.Extensions.Logging.LogLevel.Warning);
             if (textChannel != null)
             {
                 await textChannel.SendMessageAsync("user not in voice");
@@ -433,7 +434,7 @@ public class MusicClient : IAsyncDisposable
             // Параллельное скачивание с добавлением в очередь по мере готовности
             string musicFolderPath = Path.Combine(Environment.CurrentDirectory, _config["music_folder"] ?? "music");
             ConcurrentDictionary<int, Song?> downloadedSongs = new();
-            
+
             // Запускаем параллельное скачивание в фоне
             _ = Task.Run(async () =>
             {
@@ -462,9 +463,10 @@ public class MusicClient : IAsyncDisposable
                         await Task.Delay(100);
                     }
                 }
-                
+
                 await Logger.AddLog("All songs processed for queue");
-                await UpdateMusicViewAsync();
+                // Вызываем событие обновления вьюшки
+                await RequestedViewUpdateAsync();
             });
 
             // Запускаем воспроизведение, если очередь пуста (будет ждать первого трека)
@@ -486,7 +488,7 @@ public class MusicClient : IAsyncDisposable
         }
 
         await Logger.AddLog("Line len - " + music_queue.Count.ToString());
-        await UpdateMusicViewAsync();
+        await RequestedViewUpdateAsync();
 
         await PlayMusicAsync(SkipTokenSource.Token);
         return;
@@ -498,142 +500,6 @@ public class MusicClient : IAsyncDisposable
     public async Task PlayAsync(ICommandContext ctx)
     {
         await TogglePauseAsync(ctx);
-    }
-    //protected async Task<Stream> CreateStream(string filePath)
-    //{
-    //    using LogScope log_scope = new LogScope($"CreateStream called", ConsoleColor.DarkGreen);
-
-    //    var ffmpegPath = Path.Combine(Environment.CurrentDirectory, "appdata", "ffmpeg.exe");
-
-    //    var processStartInfo = new System.Diagnostics.ProcessStartInfo
-    //    {
-    //        FileName = ffmpegPath,
-    //        Arguments = $"-i \"{filePath}\" -f s16le -ar 48000 -ac 2 pipe:1",
-    //        // -i {filePath}   -> Input audio file
-    //        // -f s16le        -> 16-bit PCM (little-endian)
-    //        // -ar 48000       -> Sample rate 48 kHz
-    //        // -ac 2           -> Stereo (2 channels)
-    //        // pipe:1          -> Output to stdout (for streaming)
-    //        UseShellExecute = false,
-    //        RedirectStandardOutput = true,
-    //        RedirectStandardError = true,
-    //        CreateNoWindow = true
-    //    };
-
-    //    ffmpeg = new System.Diagnostics.Process
-    //    {
-    //        StartInfo = processStartInfo,
-    //        EnableRaisingEvents = true
-    //    };
-
-    //    ffmpeg.Exited += async (sender, args) =>
-    //    {
-    //        await Logger.AddLog("FFMPEG - ended");
-    //        is_playing = false;
-    //        _ = OnPlayMusicRequired.Invoke();
-    //        ffmpeg?.Dispose();
-    //    };
-
-    //    ffmpeg.ErrorDataReceived += (sender, e) =>
-    //    {
-    //        //if (!string.IsNullOrEmpty(e.Data))
-    //        //    Logger.AddLog($"FFMPEG Error: {e.Data}").Wait();
-    //    };
-
-    //    if (!ffmpeg.Start())
-    //    {
-    //        await Logger.AddLog("FFMPEG STARTUP ERROR",LogLevel.ERROR);
-    //        throw new Exception("FFMPEG STARTUP ERROR");
-    //    }
-
-    //    ffmpeg.BeginErrorReadLine();
-    //    await Logger.AddLog("FFMPEG - started");
-
-    //    return ffmpeg.StandardOutput.BaseStream;
-    //}
-    public async Task RerenderMusicViewAsync(IMessageChannel? channel = null, IMessage? new_msg = null)
-    {
-        await _semaphoreSlim.WaitAsync();
-        await Logger.AddLog("View render called");
-
-        try
-        {
-            if (view_message != null)
-            {
-                SocketTextChannel current_channel = (SocketTextChannel)view_message.Channel;
-
-                if (new_msg == null || (new_msg.Author.Id == _discordClient.CurrentUser.Id && new_msg.Content == "."))
-                {
-                    return;
-                }
-
-
-                if (view_message.Id != new_msg.Id)
-                {
-                    await view_message.DeleteAsync();
-                    view_message = await current_channel.SendMessageAsync(text: ".", options: new RequestOptions { RetryMode = RetryMode.RetryRatelimit });
-                }
-            }
-            else if (guild.Anchor != null)
-            {
-                IMessageChannel current_channel = (await _discordClient.GetChannelAsync(guild.Anchor.Value) as IMessageChannel)!;
-                view_message = await current_channel.SendMessageAsync(text: ".", allowedMentions: AllowedMentions.None);
-            }
-            else if (channel != null)
-            {
-                view_message = await channel.SendMessageAsync(text: ".");
-            }
-        }
-        catch (Exception e)
-        {
-            await Logger.AddLog(e.Message, LogLevel.ERROR);
-        }
-        finally
-        {
-            _semaphoreSlim.Release();
-            await UpdateMusicViewAsync();
-        }
-    }
-    public async Task<bool> UpdateMusicViewAsync()
-    {
-
-        await _semaphoreSlim.WaitAsync();
-        await Logger.AddLog("View update called");
-
-
-        Discord.Embed? embed = null;
-        if (music_queue.Count > 0 || current_song != null)
-        {
-            embed = new EmbedBuilder()
-                .WithDescription(GetQueue())
-                .WithColor(Color.Orange)
-                .WithAuthor("---LINE--------------------------------------------------",
-                is_playing ? "https://media0.giphy.com/media/v1.Y2lkPTc5MGI3NjExMHpuNm8ycXdiaTRkem81ZHN6M2w5MDdibnVrNmZ3MHhxNjIwa3VyNCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9cw/vJHNq9tziq9C3HMrIB/giphy.gif" : "")
-                .Build();
-        }
-
-        MessageComponent component = await music_view!.CreateComponent();
-        try
-        {
-            if (view_message == null)
-                return false;
-            await (view_message as IUserMessage)!.ModifyAsync(msg => { msg.Components = component; msg.Embed = embed; msg.Content = ""; });
-
-        }
-        catch (Exception)
-        {
-            await Logger.AddLog("View update failure", LogLevel.WARNING);
-        }
-        finally
-        {
-            _semaphoreSlim.Release();
-        }
-        return true;
-    }
-    public async Task SetViewMessage(SocketMessage? msg)
-    {
-        view_message = msg;
-        return;
     }
     public async Task SetAnchorAsync(ICommandContext context)
     {
@@ -704,13 +570,13 @@ public class MusicClient : IAsyncDisposable
 
         if (guild.Playlists.Count == MAX_PLAYLIST_SIZE)
         {
-            await Logger.AddLog("Playlist not added - guild lists count overflow", LogLevel.WARNING);
+            await Logger.AddLog("Playlist not added - guild lists count overflow", Microsoft.Extensions.Logging.LogLevel.Warning);
             return false;
         }
 
         if (playlist_name == null || author_id == null)
         {
-            await Logger.AddLog("Playlist or author Id == null", LogLevel.WARNING);
+            await Logger.AddLog("Playlist or author Id == null", Microsoft.Extensions.Logging.LogLevel.Warning);
             return false;
         }
 
@@ -718,7 +584,7 @@ public class MusicClient : IAsyncDisposable
 
         if (playlistExists)
         {
-            await Logger.AddLog("Playlist already exist", LogLevel.WARNING);
+            await Logger.AddLog("Playlist already exist", Microsoft.Extensions.Logging.LogLevel.Warning);
             return false;
         }
         Playlist playlist_entity;
@@ -748,7 +614,7 @@ public class MusicClient : IAsyncDisposable
             // Параллельное скачивание файлов для треков плейлиста
             string musicFolderPath = Path.Combine(Environment.CurrentDirectory, _config["music_folder"] ?? "music");
             ConcurrentDictionary<int, Song?> downloadedSongs = new();
-            
+
             // Создаем плейлист сразу (будет обновляться по мере добавления треков)
             playlist_entity = new Playlist
             {
@@ -757,13 +623,13 @@ public class MusicClient : IAsyncDisposable
                 AuthorId = author_id.Value
             };
             playlist_entity = await _playlistRepository.AddAsync(playlist_entity);
-            
+
             // Запускаем параллельное скачивание в фоне
             _ = Task.Run(async () =>
             {
                 await _audioDownloader.DownloadAsync(song_db_instances, _songRepository, musicFolderPath, downloadedSongs);
             });
-            
+
             // Отслеживаем готовые треки и добавляем в плейлист по порядку
             _ = Task.Run(async () =>
             {
@@ -795,7 +661,7 @@ public class MusicClient : IAsyncDisposable
                         await Task.Delay(100);
                     }
                 }
-                
+
                 await Logger.AddLog("All songs processed for playlist");
             });
         }
@@ -819,7 +685,7 @@ public class MusicClient : IAsyncDisposable
         }
 
         await UpdateLikedMusicAsync();
-        await UpdateMusicViewAsync();
+        await RequestedViewUpdateAsync();
         return true;
     }
     public async Task UpdatePopularSongsAsync()
@@ -874,29 +740,13 @@ public class MusicClient : IAsyncDisposable
 
     }
 
-    public string GetQueue()
+    /// <summary>
+    /// Вызывает событие обновления вьюшки
+    /// </summary>
+    protected async Task RequestedViewUpdateAsync()
     {
-        if (!music_queue.IsEmpty || current_song != null || (music_queue.Count == 1 && on_repeat))
-        {
-            StringBuilder result = new();
-            int offset = on_repeat ? 1 : 0;
-            List<KeyValuePair<IVoiceChannel, Song>> music_list = music_queue.ToList();
 
-            for (int q = music_list.Count - 1; q >= offset; q--)
-            {
-                string temp = music_list[q].Value.Name;
-                result.Append($"{(q + 2 - offset).ToString()} {temp}\n");
-            }
-
-
-            if ((is_playing || is_paused) && current_song != null)
-            {
-                result.Append($"**1. {current_song.Value.Value.Name}**");
-            }
-
-            return result.ToString();
-        }
-        return "";
+        await ViewUpdateRequested.Invoke();
     }
 
     public async ValueTask DisposeAsync()
@@ -905,8 +755,8 @@ public class MusicClient : IAsyncDisposable
             ffmpeg.Dispose();
         if (audio_client != null)
             audio_client.Dispose();
-        if (view_message != null)
-            await view_message.DeleteAsync();
+        if (music_view != null)
+            await music_view.DeleteViewMessageAsync();
         return;
     }
 }

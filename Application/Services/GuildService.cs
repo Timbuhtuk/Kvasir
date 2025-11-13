@@ -1,5 +1,4 @@
 using Application.Interfaces;
-using CS_Discord_Bot.music_parts;
 using Discord.Commands;
 using Discord.WebSocket;
 using Entities.Models;
@@ -10,11 +9,11 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Application.Services;
 
 /// <summary>
-/// Service for managing collection of MusicClient instances
+/// Service for managing collection of MusicClientService instances
 /// </summary>
 public class GuildService : IAsyncDisposable
 {
-    private readonly Dictionary<ulong, (MusicClient MusicClient, IServiceScope Scope)> _musicClients;
+    private readonly Dictionary<ulong, (MusicClientService MusicClient, IServiceScope Scope)> _musicClients;
     private readonly IServiceScopeFactory _serviceScopeFactory;
     private readonly DiscordSocketClient _client;
     private readonly IConfiguration _config;
@@ -28,7 +27,7 @@ public class GuildService : IAsyncDisposable
         VideoFinderService videoFinder,
         IAudioDownloaderService audioDownloader)
     {
-        _musicClients = new Dictionary<ulong, (MusicClient, IServiceScope)>();
+        _musicClients = new Dictionary<ulong, (MusicClientService, IServiceScope)>();
         _serviceScopeFactory = serviceScopeFactory;
         _client = client;
         _config = config;
@@ -37,9 +36,9 @@ public class GuildService : IAsyncDisposable
     }
 
     /// <summary>
-    /// Gets or creates a MusicClient for the specified guild
+    /// Gets or creates a MusicClientService for the specified guild
     /// </summary>
-    public async Task<MusicClient> GetOrCreateAsync(SocketGuild guild)
+    public async Task<MusicClientService> GetOrCreateAsync(SocketGuild guild)
     {
         if (_musicClients.TryGetValue(guild.Id, out var clientData))
         {
@@ -52,9 +51,9 @@ public class GuildService : IAsyncDisposable
     }
 
     /// <summary>
-    /// Gets MusicClient for the specified guild ID, returns null if not found
+    /// Gets MusicClientService for the specified guild ID, returns null if not found
     /// </summary>
-    public MusicClient? GetMusicClient(ulong guildId)
+    public MusicClientService? GetMusicClient(ulong guildId)
     {
         if (_musicClients.TryGetValue(guildId, out var clientData))
         {
@@ -64,7 +63,7 @@ public class GuildService : IAsyncDisposable
     }
 
     /// <summary>
-    /// Initializes MusicClients for all guilds the bot is connected to
+    /// Initializes MusicClientServices for all guilds the bot is connected to
     /// </summary>
     public async Task FillAsync()
     {
@@ -73,7 +72,7 @@ public class GuildService : IAsyncDisposable
         {
             await GetOrCreateAsync(guild);
         }
-        await Logger.AddLog($"MusicClient created for {_client.Guilds.Count} guilds");
+        await Logger.AddLog($"MusicClientService created for {_client.Guilds.Count} guilds");
     }
 
     // Music command methods
@@ -81,62 +80,62 @@ public class GuildService : IAsyncDisposable
     {
         // Контекст уже установлен в CommandHandler, но убедимся
         LogContext.SetGuild(context.Guild.Id, context.Guild.Name);
-        MusicClient musicClient = await GetOrCreateAsync(context.Guild);
+        MusicClientService musicClient = await GetOrCreateAsync(context.Guild);
         await musicClient.SetAnchorAsync(context);
     }
 
     public async Task ClearAsync(SocketCommandContext context)
     {
         LogContext.SetGuild(context.Guild.Id, context.Guild.Name);
-        MusicClient musicClient = await GetOrCreateAsync(context.Guild);
+        MusicClientService musicClient = await GetOrCreateAsync(context.Guild);
         await musicClient.ClearAsync(context);
     }
 
     public async Task LeaveAsync(SocketCommandContext context)
     {
         LogContext.SetGuild(context.Guild.Id, context.Guild.Name);
-        MusicClient musicClient = await GetOrCreateAsync(context.Guild);
+        MusicClientService musicClient = await GetOrCreateAsync(context.Guild);
         await musicClient.LeaveAsync(context);
     }
 
     public async Task PauseAsync(SocketCommandContext context)
     {
         LogContext.SetGuild(context.Guild.Id, context.Guild.Name);
-        MusicClient musicClient = await GetOrCreateAsync(context.Guild);
+        MusicClientService musicClient = await GetOrCreateAsync(context.Guild);
         await musicClient.TogglePauseAsync(context);
     }
 
     public async Task PlayAsync(SocketCommandContext context, string query)
     {
         LogContext.SetGuild(context.Guild.Id, context.Guild.Name);
-        MusicClient musicClient = await GetOrCreateAsync(context.Guild);
+        MusicClientService musicClient = await GetOrCreateAsync(context.Guild);
         await musicClient.PlayAsync(context, query);
     }
 
     public async Task PlayAsync(SocketCommandContext context)
     {
         LogContext.SetGuild(context.Guild.Id, context.Guild.Name);
-        MusicClient musicClient = await GetOrCreateAsync(context.Guild);
+        MusicClientService musicClient = await GetOrCreateAsync(context.Guild);
         await musicClient.PlayAsync(context);
     }
 
     public async Task ResumeAsync(SocketCommandContext context)
     {
         LogContext.SetGuild(context.Guild.Id, context.Guild.Name);
-        MusicClient musicClient = await GetOrCreateAsync(context.Guild);
+        MusicClientService musicClient = await GetOrCreateAsync(context.Guild);
         await musicClient.TogglePauseAsync(context);
     }
 
     public async Task SkipAsync(SocketCommandContext context)
     {
         LogContext.SetGuild(context.Guild.Id, context.Guild.Name);
-        MusicClient musicClient = await GetOrCreateAsync(context.Guild);
+        MusicClientService musicClient = await GetOrCreateAsync(context.Guild);
         await musicClient.SkipAsync(context);
     }
 
-    private async Task<(MusicClient MusicClient, IServiceScope Scope)> CreateMusicClientAsync(SocketGuild socketGuild)
+    private async Task<(MusicClientService MusicClient, IServiceScope Scope)> CreateMusicClientAsync(SocketGuild socketGuild)
     {
-        // Создаем scope для этой гильдии - он будет жить пока живет MusicClient
+        // Создаем scope для этой гильдии - он будет жить пока живет MusicClientService
         IServiceScope scope = _serviceScopeFactory.CreateScope();
         IGuildRepository guildRepository = scope.ServiceProvider.GetRequiredService<IGuildRepository>();
 
@@ -152,10 +151,10 @@ public class GuildService : IAsyncDisposable
             guild = await guildRepository.AddAsync(guild);
         }
 
-        // Создаем MusicClient через ActivatorUtilities с параметрами
-        // MusicView будет создан внутри MusicClient через scope
+        // Создаем MusicClientService через ActivatorUtilities с параметрами
+        // MusicViewService будет создан внутри MusicClientService через scope
         // Репозитории будут автоматически инжектированы из scope
-        MusicClient musicClient = Microsoft.Extensions.DependencyInjection.ActivatorUtilities.CreateInstance<MusicClient>(
+        MusicClientService musicClient = Microsoft.Extensions.DependencyInjection.ActivatorUtilities.CreateInstance<MusicClientService>(
             scope.ServiceProvider,
             guild,
             _serviceScopeFactory,

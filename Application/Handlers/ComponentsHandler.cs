@@ -1,7 +1,6 @@
 ﻿using Application;
 using Application.Services;
 using Logging;
-using CS_Discord_Bot.music_parts;
 using Discord.WebSocket;
 using Entities.Enums;
 
@@ -39,7 +38,7 @@ public class ComponentHandler
         {
             if (interaction is SocketMessageComponent component)
             {
-                MusicClient? music_client = _guildService.GetMusicClient(interaction.GuildId ?? 0);
+                MusicClientService? music_client = _guildService.GetMusicClient(interaction.GuildId ?? 0);
                 if (music_client != null)
                 {
                     music_client.music_view.HandleComponent(component);

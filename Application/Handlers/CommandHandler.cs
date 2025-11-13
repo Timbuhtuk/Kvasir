@@ -56,7 +56,7 @@ public class CommandHandler
                 if (!result.IsSuccess)
                 {
                     // guildId и guildName теперь автоматически берутся из LogContext
-                    await Logger.AddLog(result.ErrorReason, LogLevel.ERROR);
+                    await Logger.AddLog(result.ErrorReason, Microsoft.Extensions.Logging.LogLevel.Error);
                 }
                 await message.DeleteAsync();
             }

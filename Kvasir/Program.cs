@@ -2,7 +2,6 @@
 using Application.Services;
 using CS_Discord_Bot.Commands;
 using CS_Discord_Bot.Handlers;
-using CS_Discord_Bot.music_parts;
 using Discord;
 using Discord.Commands;
 using Discord.WebSocket;
@@ -16,7 +15,6 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using System.Diagnostics;
 using EventHandler = CS_Discord_Bot.Handlers.EventHandler;
-using LogLevel = Entities.Enums.LogLevel;
 
 namespace CS_Discord_Bot;
 
@@ -90,13 +88,21 @@ public class Program
         {
             options.UseSqlServer(configuration["connection_string"]);
 
-            // Используем наш кастомный логгер для EF Core
-            options.UseLoggerFactory(LoggerFactory.Create(builder =>
+            // Настройка логирования БД из конфига
+            string? dbLogLevelStr = configuration["logging:dbLogLevel"];
+            if (!string.IsNullOrEmpty(dbLogLevelStr) && 
+                Enum.TryParse<Microsoft.Extensions.Logging.LogLevel>(dbLogLevelStr, ignoreCase: true, out var dbLogLevel) &&
+                dbLogLevel != Microsoft.Extensions.Logging.LogLevel.None)
             {
-                builder.AddProvider(new Logging.EfCoreLoggerProvider());
-                // Устанавливаем минимальный уровень логирования
-                builder.SetMinimumLevel(Microsoft.Extensions.Logging.LogLevel.Information);
-            }));
+                // Используем наш кастомный логгер для EF Core
+                options.UseLoggerFactory(LoggerFactory.Create(builder =>
+                {
+                    builder.AddProvider(new Logging.EfCoreLoggerProvider());
+                    // Устанавливаем минимальный уровень логирования из конфига
+                    builder.SetMinimumLevel(dbLogLevel);
+                }));
+            }
+            // Если db_log_level = "None" или не указан, логирование БД отключено
         });
     }
 
@@ -112,9 +118,9 @@ public class Program
         services.AddSingleton<IAudioDownloaderService, AudioDownloaderService>();
 
 
-        // MusicClient и MusicView - scoped сервисы, создаются через scope в GuildService
-        services.AddScoped<MusicClient>();
-        services.AddScoped<MusicView>();
+        // MusicClientService и MusicViewService - scoped сервисы, создаются через scope в GuildService
+        services.AddScoped<MusicClientService>();
+        services.AddScoped<MusicViewService>();
 
         services.AddSingleton<MusicCommands>();
         services.AddSingleton<GuildService>();
@@ -151,7 +157,7 @@ public class Program
         }
         catch (Exception ex)
         {
-            await Logger.AddLog($"Error during process exit: {ex.Message}", LogCategory.General, LogLevel.ERROR, exception: ex);
+            await Logger.AddLog($"Error during process exit: {ex.Message}", LogCategory.General, Microsoft.Extensions.Logging.LogLevel.Error, exception: ex);
         }
     }
 }

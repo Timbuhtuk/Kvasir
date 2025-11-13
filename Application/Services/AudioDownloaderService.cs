@@ -46,7 +46,7 @@ public class AudioDownloaderService : IAudioDownloaderService
     {
         if (song.Link == null)
         {
-            await Logger.AddLog("song link was null", LogLevel.ERROR);
+            await Logger.AddLog("song link was null", Microsoft.Extensions.Logging.LogLevel.Error);
             return null;
         }
 
@@ -63,20 +63,20 @@ public class AudioDownloaderService : IAudioDownloaderService
         {
             // If primary provider failed, try fallback provider
             Provider fallbackProvider = provider == Provider.YoutubeExplode ? Provider.YoutubeDLSharp : Provider.YoutubeExplode;
-            await Logger.AddLog($"Primary provider failed, trying fallback provider: {fallbackProvider}", LogLevel.WARNING);
+            await Logger.AddLog($"Primary provider failed, trying fallback provider: {fallbackProvider}", Microsoft.Extensions.Logging.LogLevel.Warning);
             pcmFilePath = await TryDownloadWithProvider(song.Link, song, musicFolderPath, fallbackProvider);
         }
 
         if (pcmFilePath == null)
         {
-            await Logger.AddLog("Failed to download audio from all providers", LogLevel.ERROR);
+            await Logger.AddLog("Failed to download audio from all providers", Microsoft.Extensions.Logging.LogLevel.Error);
             return null;
         }
 
         // Проверяем, что файл действительно был создан
         if (!File.Exists(pcmFilePath))
         {
-            await Logger.AddLog($"PCM file was not created: {pcmFilePath}", LogLevel.ERROR);
+            await Logger.AddLog($"PCM file was not created: {pcmFilePath}", Microsoft.Extensions.Logging.LogLevel.Error);
             return null;
         }
 
@@ -106,7 +106,7 @@ public class AudioDownloaderService : IAudioDownloaderService
         }
         catch (Exception ex)
         {
-            await Logger.AddLog($"Download failed with {provider}: {ex.Message}", LogLevel.ERROR);
+            await Logger.AddLog($"Download failed with {provider}: {ex.Message}", Microsoft.Extensions.Logging.LogLevel.Error);
         }
         return null;
     }
@@ -124,7 +124,7 @@ public class AudioDownloaderService : IAudioDownloaderService
 
         if (!audioStreams.Any())
         {
-            await Logger.AddLog($"No audio stream available", LogLevel.ERROR);
+            await Logger.AddLog($"No audio stream available", Microsoft.Extensions.Logging.LogLevel.Error);
             throw new Exception("No audio stream available");
         }
 
@@ -156,7 +156,7 @@ public class AudioDownloaderService : IAudioDownloaderService
             
             if (convertedPath == null || !File.Exists(convertedPath))
             {
-                await Logger.AddLog($"FFmpeg conversion failed or file was not created: {convertedPath}", LogLevel.ERROR);
+                await Logger.AddLog($"FFmpeg conversion failed or file was not created: {convertedPath}", Microsoft.Extensions.Logging.LogLevel.Error);
                 return null;
             }
 
@@ -214,7 +214,7 @@ public class AudioDownloaderService : IAudioDownloaderService
                 
                 if (convertedPath == null)
                 {
-                    await Logger.AddLog("FFmpeg conversion failed", LogLevel.ERROR);
+                    await Logger.AddLog("FFmpeg conversion failed", Microsoft.Extensions.Logging.LogLevel.Error);
                     return null;
                 }
 
@@ -225,7 +225,7 @@ public class AudioDownloaderService : IAudioDownloaderService
                 string errorMessage = result.ErrorOutput != null && result.ErrorOutput.Count() > 0
                     ? result.ErrorOutput[0]
                     : "Unknown error";
-                await Logger.AddLog($"Download failed: {errorMessage}", LogLevel.ERROR);
+                await Logger.AddLog($"Download failed: {errorMessage}", Microsoft.Extensions.Logging.LogLevel.Error);
                 throw new Exception($"YoutubeDLSharp download failed: {errorMessage}");
             }
         }
@@ -295,7 +295,7 @@ public class AudioDownloaderService : IAudioDownloaderService
                 }
                 catch (Exception ex)
                 {
-                    await Logger.AddLog($"Failed to download song at index {index}: {ex.Message}", LogLevel.ERROR);
+                    await Logger.AddLog($"Failed to download song at index {index}: {ex.Message}", Microsoft.Extensions.Logging.LogLevel.Error);
                     downloadedSongs[index] = null;
                 }
                 finally

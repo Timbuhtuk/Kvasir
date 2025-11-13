@@ -1,6 +1,5 @@
 using Application.Interfaces;
 using CS_Discord_Bot.Handlers;
-using CS_Discord_Bot.music_parts;
 using Discord;
 using Discord.Commands;
 using Discord.WebSocket;
@@ -12,7 +11,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using EventHandler = CS_Discord_Bot.Handlers.EventHandler;
-using LogLevel = Entities.Enums.LogLevel;
 
 namespace Application.Services;
 
@@ -80,7 +78,7 @@ public class DiscordBotService : IHostedService
         await UpdateDBGuildsAsync();
         await _guildService.FillAsync();
 
-        await Logger.AddLog($"logged as {_client.CurrentUser.Username}", LogLevel.WARNING);
+        await Logger.AddLog($"logged as {_client.CurrentUser.Username}", Microsoft.Extensions.Logging.LogLevel.Warning);
         _ = CleanupAnchorChannelsAsync();
         _ = ResolveMissingfilesInDBAsync();
     }
@@ -133,14 +131,13 @@ public class DiscordBotService : IHostedService
                     SocketGuild? socketGuild = _client.GetGuild(guild.DiscordId);
                     if (socketGuild == null)
                     {
-                        await Logger.AddLog($"Guild {guild.Name} (ID: {guild.DiscordId}) not found in Discord", LogLevel.WARNING);
+                        await Logger.AddLog($"Guild {guild.Name} (ID: {guild.DiscordId}) not found in Discord", Microsoft.Extensions.Logging.LogLevel.Warning);
                         continue;
                     }
 
-                    ITextChannel? channel = await _client.GetChannelAsync(guild.Anchor.Value) as ITextChannel;
-                    if (channel == null)
+                    if (await _client.GetChannelAsync(guild.Anchor.Value) is not ITextChannel channel)
                     {
-                        await Logger.AddLog($"Anchor channel {guild.Anchor.Value} not found for guild {guild.Name}", LogLevel.WARNING);
+                        await Logger.AddLog($"Anchor channel {guild.Anchor.Value} not found for guild {guild.Name}", Microsoft.Extensions.Logging.LogLevel.Warning);
                         continue;
                     }
 
@@ -168,7 +165,7 @@ public class DiscordBotService : IHostedService
                             }
                             catch (Exception ex)
                             {
-                                await Logger.AddLog($"Failed to delete message {message.Id} in channel {channel.Name}: {ex.Message}", LogLevel.ERROR);
+                                await Logger.AddLog($"Failed to delete message {message.Id} in channel {channel.Name}: {ex.Message}", Microsoft.Extensions.Logging.LogLevel.Error);
                             }
                         }
 
@@ -184,7 +181,7 @@ public class DiscordBotService : IHostedService
                 }
                 catch (Exception ex)
                 {
-                    await Logger.AddLog($"Error cleaning up Anchor channel for guild {guild.Name}: {ex.Message}", LogLevel.ERROR, exception: ex);
+                    await Logger.AddLog($"Error cleaning up Anchor channel for guild {guild.Name}: {ex.Message}", Microsoft.Extensions.Logging.LogLevel.Error, exception: ex);
                 }
                 finally
                 {
@@ -196,7 +193,7 @@ public class DiscordBotService : IHostedService
         }
         catch (Exception ex)
         {
-            await Logger.AddLog($"Error during Anchor channels cleanup: {ex.Message}", LogLevel.ERROR, exception: ex);
+            await Logger.AddLog($"Error during Anchor channels cleanup: {ex.Message}", Microsoft.Extensions.Logging.LogLevel.Error, exception: ex);
         }
     }
 
@@ -213,29 +210,43 @@ public class DiscordBotService : IHostedService
         List<Song> songs = allSongs.ToList();
         foreach (Song song in songs)
         {
-                // Проверяем наличие PCM файла
-                if (string.IsNullOrEmpty(song.FilePath) || !File.Exists(song.FilePath))
+            // Проверяем наличие PCM файла
+            if (string.IsNullOrEmpty(song.FilePath) || !File.Exists(song.FilePath))
+            {
+                using (var audioScope = _serviceScopeFactory.CreateScope())
                 {
-                    using (var audioScope = _serviceScopeFactory.CreateScope())
+                    IAudioDownloaderService audioDownloader = audioScope.ServiceProvider.GetRequiredService<IAudioDownloaderService>();
+                    IConfiguration configuration = audioScope.ServiceProvider.GetRequiredService<IConfiguration>();
+                    string musicFolderPath = Path.Combine(Environment.CurrentDirectory, configuration["music_folder"] ?? "music");
+
+                    // Сохраняем оригинальный путь для сравнения
+                    string? originalFilePath = song.FilePath;
+
+                    Song? downloaded_song = await audioDownloader.Download(song, songRepository, musicFolderPath);
+                    if (downloaded_song == null || string.IsNullOrEmpty(downloaded_song.FilePath) || !File.Exists(downloaded_song.FilePath))
                     {
-                        IAudioDownloaderService audioDownloader = audioScope.ServiceProvider.GetRequiredService<IAudioDownloaderService>();
-                        IConfiguration configuration = audioScope.ServiceProvider.GetRequiredService<IConfiguration>();
-                        string musicFolderPath = Path.Combine(Environment.CurrentDirectory, configuration["music_folder"] ?? "music");
-                        
-                        Song? downloaded_song = await audioDownloader.Download(song, songRepository, musicFolderPath);
-                        if (downloaded_song == null || string.IsNullOrEmpty(downloaded_song.FilePath) || !File.Exists(downloaded_song.FilePath))
+                        await songRepository.RemoveAsync(song);
+                        await Logger.AddLog($"{song.Name} - removed from DB (failed to download or file missing)");
+                    }
+                    else
+                    {
+                        // Проверяем, изменился ли путь к файлу после скачивания
+                        if (downloaded_song.FilePath != originalFilePath)
                         {
-                            await songRepository.RemoveAsync(song);
-                            await Logger.AddLog($"{song.Name} - removed from DB (failed to download or file missing)");
+                            // Обновляем путь в БД, если он изменился
+                            song.FilePath = downloaded_song.FilePath;
+                            await songRepository.UpdateAsync(song);
+                            await Logger.AddLog($"{song.Name} - file downloaded successfully, path updated in DB: {downloaded_song.FilePath}");
                         }
                         else
                         {
                             await Logger.AddLog($"{song.Name} - file downloaded successfully: {downloaded_song.FilePath}");
                         }
-
-                        resolved++;
                     }
+
+                    resolved++;
                 }
+            }
         }
         return resolved;
     }

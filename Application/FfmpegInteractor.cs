@@ -15,7 +15,7 @@ public struct FfmpegInteractor
     {
         if (!File.Exists(file_path))
         {
-            await Logger.AddLog("File to convert not found!", LogLevel.ERROR);
+            await Logger.AddLog("File to convert not found!", Microsoft.Extensions.Logging.LogLevel.Error);
             return null;
         }
 
@@ -23,7 +23,7 @@ public struct FfmpegInteractor
 
         if (!File.Exists(ffmpegPath))
         {
-            await Logger.AddLog("FFmpeg executable not found!", LogLevel.ERROR);
+            await Logger.AddLog("FFmpeg executable not found!", Microsoft.Extensions.Logging.LogLevel.Error);
             return null;
         }
 
@@ -48,7 +48,7 @@ public struct FfmpegInteractor
 
         if (!ffmpegProcess.Start())
         {
-            await Logger.AddLog("FFMPEG STARTUP ERROR", LogLevel.ERROR);
+            await Logger.AddLog("FFMPEG STARTUP ERROR", Microsoft.Extensions.Logging.LogLevel.Error);
             return null;
         }
 
@@ -66,7 +66,7 @@ public struct FfmpegInteractor
 
         if (ffmpegProcess.ExitCode != 0)
         {
-            await Logger.AddLog($"FFmpeg conversion failed with exit code {ffmpegProcess.ExitCode}", LogLevel.ERROR);
+            await Logger.AddLog($"FFmpeg conversion failed with exit code {ffmpegProcess.ExitCode}", Microsoft.Extensions.Logging.LogLevel.Error);
             return null;
         }
 
@@ -83,7 +83,7 @@ public struct FfmpegInteractor
             return null;
         if (!File.Exists(file_path))
         {
-            await Logger.AddLog("File to convert not found!", LogLevel.ERROR);
+            await Logger.AddLog("File to convert not found!", Microsoft.Extensions.Logging.LogLevel.Error);
             return null;
         }
 
@@ -93,7 +93,7 @@ public struct FfmpegInteractor
 
         if (!File.Exists(ffmpegPath))
         {
-            await Logger.AddLog("FFmpeg executable not found!", LogLevel.ERROR);
+            await Logger.AddLog("FFmpeg executable not found!", Microsoft.Extensions.Logging.LogLevel.Error);
             return null;
         }
 
@@ -117,7 +117,7 @@ public struct FfmpegInteractor
 
         if (!ffmpegProcess.Start())
         {
-            await Logger.AddLog("FFMPEG STARTUP ERROR", LogLevel.ERROR);
+            await Logger.AddLog("FFMPEG STARTUP ERROR", Microsoft.Extensions.Logging.LogLevel.Error);
             return null;
         }
 
@@ -127,7 +127,7 @@ public struct FfmpegInteractor
 
         if (ffmpegProcess.ExitCode != 0)
         {
-            await Logger.AddLog($"FFmpeg conversion failed with exit code {ffmpegProcess.ExitCode}", LogLevel.ERROR);
+            await Logger.AddLog($"FFmpeg conversion failed with exit code {ffmpegProcess.ExitCode}", Microsoft.Extensions.Logging.LogLevel.Error);
         }
 
         await Logger.AddLog("FFMPEG - conversion completed");

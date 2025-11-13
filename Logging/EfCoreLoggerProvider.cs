@@ -1,7 +1,6 @@
 using Entities.Enums;
 using Microsoft.Extensions.Logging;
 using System.Threading.Tasks;
-using EFCoreLogLevel = Microsoft.Extensions.Logging.LogLevel;
 
 namespace Logging;
 
@@ -38,32 +37,18 @@ public class EfCoreLogger : ILogger
 
     public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
 
-    public bool IsEnabled(EFCoreLogLevel logLevel)
+    public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel)
     {
-        // Проверяем уровень логирования нашей системы
-        int ourLevel = logLevel switch
-        {
-            EFCoreLogLevel.Error or EFCoreLogLevel.Critical => 1,
-            EFCoreLogLevel.Warning => 2,
-            _ => 3
-        };
-        return Logger.LoggingLevel >= ourLevel;
+        // Проверяем минимальный уровень логирования
+        return logLevel >= Logger.MinimumLogLevel && logLevel != Microsoft.Extensions.Logging.LogLevel.None;
     }
 
-    public void Log<TState>(EFCoreLogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+    public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
     {
         if (!IsEnabled(logLevel))
             return;
 
         string message = formatter(state, exception);
-        
-        // Преобразуем LogLevel из Microsoft.Extensions.Logging в наш LogLevel
-        Entities.Enums.LogLevel ourLogLevel = logLevel switch
-        {
-            EFCoreLogLevel.Error or EFCoreLogLevel.Critical => Entities.Enums.LogLevel.ERROR,
-            EFCoreLogLevel.Warning => Entities.Enums.LogLevel.WARNING,
-            _ => Entities.Enums.LogLevel.INFO
-        };
 
         // Используем нашу систему логирования с категорией Database
         // guildId и guildName автоматически возьмутся из LogContext, если они там установлены
@@ -75,7 +60,7 @@ public class EfCoreLogger : ILogger
                 // Пытаемся извлечь guildId из SQL-запроса, если он есть в параметрах
                 ulong? guildIdFromQuery = ExtractGuildIdFromMessage(message);
                 
-                await Logger.AddLog(message, LogCategory.Database, ourLogLevel, 
+                await Logger.AddLog(message, LogCategory.Database, logLevel, 
                     guildId: guildIdFromQuery ?? LogContext.GuildId, 
                     guildName: LogContext.GuildName, 
                     exception: exception);
@@ -129,7 +114,7 @@ public class EfCoreLogger : ILogger
 public class NullLogger : ILogger
 {
     public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
-    public bool IsEnabled(EFCoreLogLevel logLevel) => false;
-    public void Log<TState>(EFCoreLogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) { }
+    public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => false;
+    public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) { }
 }
 

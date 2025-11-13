@@ -1,6 +1,7 @@
 using Discord;
 using Entities.Enums;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Reflection;
@@ -19,16 +20,16 @@ public static class Logger
     private static readonly string _logsDirectory = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "logs");
     private static readonly string _generalLogsDirectory = Path.Combine(_logsDirectory, "general");
     private static readonly string _guildLogsDirectory = Path.Combine(_logsDirectory, "guilds");
-    
+
     private static Timer? _flushTimer;
-    
-    public static int LoggingLevel { get; set; } = 3; // 0 - no logging, 1 - only error, 2 - warnings, 3 - all
+
+    public static LogLevel MinimumLogLevel { get; set; } = LogLevel.Information;
     public static bool EnableFileLogging { get; set; } = true;
     public static bool EnableConsoleLogging { get; set; } = true;
-    
+
     public const ConsoleColor _DEFAULT_OUTLINE_COLOR = ConsoleColor.Cyan;
     public static ConsoleColor outline_color = ConsoleColor.Cyan;
-    
+
     /// <summary>
     /// Автоматически определяет глубину логирования на основе стека вызовов
     /// Считает количество уровней вложенности методов до вызова Logger.AddLog
@@ -37,10 +38,10 @@ public static class Logger
     {
         try
         {
-            StackTrace stackTrace = new StackTrace(skipFrames: 1, fNeedFileInfo: false);
+            StackTrace stackTrace = new(skipFrames: 1, fNeedFileInfo: false);
             int depth = 0;
             bool foundLoggerCall = false;
-            
+
             // Проходим по стеку вызовов снизу вверх
             for (int i = 0; i < stackTrace.FrameCount; i++)
             {
@@ -53,34 +54,34 @@ public static class Logger
                     continue;
 
                 string? declaringTypeName = method.DeclaringType?.FullName;
-                
+
                 // Пропускаем методы самого Logger и внутренние методы логирования
                 if (declaringTypeName != null && declaringTypeName.StartsWith("Logging.Logger"))
                 {
                     foundLoggerCall = true;
                     continue;
                 }
-                
+
                 // Пропускаем методы из System, Microsoft и других системных библиотек
-                if (declaringTypeName != null && 
-                    (declaringTypeName.StartsWith("System.") || 
+                if (declaringTypeName != null &&
+                    (declaringTypeName.StartsWith("System.") ||
                      declaringTypeName.StartsWith("Microsoft.") ||
                      declaringTypeName.StartsWith("Discord.")))
                 {
                     continue;
                 }
-                
+
                 // Если мы уже прошли вызов Logger, считаем остальные методы как глубину
                 if (foundLoggerCall)
                 {
                     depth++;
                 }
-                
+
                 // Ограничиваем максимальную глубину для производительности
                 if (depth >= 15)
                     break;
             }
-            
+
             return depth;
         }
         catch
@@ -92,16 +93,18 @@ public static class Logger
 
     public static void Initialize(IConfiguration configuration)
     {
-        if (int.TryParse(configuration["logging"], out int level))
+        // Читаем уровень логирования из конфига
+        if (!string.IsNullOrEmpty(configuration["logging:level"]) &&
+            Enum.TryParse<LogLevel>(configuration["logging:level"], ignoreCase: true, out var parsedLevel))
         {
-            LoggingLevel = level;
+            MinimumLogLevel = parsedLevel;
         }
-        
+
         if (bool.TryParse(configuration["logging:enableFileLogging"], out bool enableFile))
         {
             EnableFileLogging = enableFile;
         }
-        
+
         if (bool.TryParse(configuration["logging:enableConsoleLogging"], out bool enableConsole))
         {
             EnableConsoleLogging = enableConsole;
@@ -113,7 +116,7 @@ public static class Logger
             Directory.CreateDirectory(_logsDirectory);
             Directory.CreateDirectory(_generalLogsDirectory);
             Directory.CreateDirectory(_guildLogsDirectory);
-            
+
             // Запускаем таймер для периодической записи логов в файлы
             _flushTimer = new Timer(FlushLogsToFiles, null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
         }
@@ -142,7 +145,7 @@ public static class Logger
         // Определяем категорию по пути и имени файла
         if (normalizedPath.Contains("/music_parts/") || normalizedPath.Contains("\\music_parts\\"))
         {
-            if (fileName.Contains("MusicClient"))
+            if (fileName.Contains("MusicClientService"))
                 return LogCategory.Music;
             if (fileName.Contains("AudioDownloader"))
                 return LogCategory.AudioDownload;
@@ -202,8 +205,8 @@ public static class Logger
         {
             // Получаем стек вызовов
             // Пропускаем: GetCategoryFromAttribute, DetermineCategory, Logger.AddLog
-            StackTrace stackTrace = new StackTrace(skipFrames: 3, fNeedFileInfo: false);
-            
+            StackTrace stackTrace = new(skipFrames: 3, fNeedFileInfo: false);
+
             // Проходим по стеку вызовов, начиная с вызывающего метода
             for (int i = 0; i < stackTrace.FrameCount; i++)
             {
@@ -254,7 +257,7 @@ public static class Logger
     public static async Task AddLog(
         string message,
         LogCategory category,
-        LogLevel msgType = LogLevel.INFO,
+        LogLevel msgType = LogLevel.Information,
         ulong? guildId = null,
         string? guildName = null,
         [CallerMemberName] string caller = "",
@@ -264,13 +267,13 @@ public static class Logger
     {
         await AddLogInternal(message, category, msgType, guildId, guildName, null, caller, file, line, exception);
     }
-    
+
     /// <summary>
     /// Добавить лог с поддержкой именованных параметров для гильдии
     /// </summary>
     public static async Task AddLog(
         string message,
-        LogLevel msgType = LogLevel.INFO,
+        LogLevel msgType = LogLevel.Information,
         ulong? guildId = null,
         string? guildName = null,
         Exception? exception = null,
@@ -289,9 +292,9 @@ public static class Logger
     {
         // Для Discord логов категория всегда Discord
         await AddLogInternal(
-            log.Exception == null ? log.Message : log.Exception.Message, 
+            log.Exception == null ? log.Message : log.Exception.Message,
             LogCategory.Discord,
-            log.Exception == null ? LogLevel.INFO : LogLevel.ERROR,
+            log.Exception == null ? LogLevel.Information : LogLevel.Error,
             exception: log.Exception);
     }
 
@@ -301,7 +304,7 @@ public static class Logger
     private static async Task AddLogInternal(
         string message,
         LogCategory? category = null,
-        LogLevel level = LogLevel.INFO,
+        LogLevel level = LogLevel.Information,
         ulong? guildId = null,
         string? guildName = null,
         ConsoleColor? color = null,
@@ -319,9 +322,8 @@ public static class Logger
         // Автоматически определяем категорию, если не указана
         LogCategory determinedCategory = category ?? DetermineCategory(file, caller);
 
-        int logLevel = level == LogLevel.ERROR ? 1 : level == LogLevel.WARNING ? 2 : 3;
-        
-        if (LoggingLevel < logLevel)
+        // Проверяем минимальный уровень логирования
+        if (level < MinimumLogLevel)
             return;
 
         string time = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
@@ -329,14 +331,14 @@ public static class Logger
         int threadId = Thread.CurrentThread.ManagedThreadId;
 
         // Определяем цвет для консоли
-        ConsoleColor consoleColor = color ?? 
-            (level == LogLevel.ERROR ? ConsoleColor.Red : 
-             level == LogLevel.WARNING ? ConsoleColor.Yellow : 
+        ConsoleColor consoleColor = color ??
+            (level >= LogLevel.Error ? ConsoleColor.Red :
+             level == LogLevel.Warning ? ConsoleColor.Yellow :
              ConsoleColor.White);
 
         // Автоматически определяем глубину через стек вызовов
         int calculatedDepth = CalculateDepth();
-        
+
         // Создаем структурированную запись лога
         var logEntry = new LogEntry
         {
@@ -369,8 +371,12 @@ public static class Logger
 
     private static async Task WriteToConsole(LogEntry entry, ConsoleColor color, string time, string fileShort)
     {
+        if (entry.GuildId is not (null or 1364606623775068191))
+            return;
+
+
         await Task.Yield();
-        
+
         string offset = "";
         for (int q = 0; q < entry.Depth; q++)
             offset += " |";
@@ -381,7 +387,16 @@ public static class Logger
 
         string categoryStr = $"[{entry.Category}]";
         string guildStr = entry.GuildId.HasValue ? $"[Guild: {entry.GuildName ?? entry.GuildId.ToString()}]" : "";
-        string levelStr = entry.Level == LogLevel.ERROR ? "ERR" : entry.Level == LogLevel.WARNING ? "WAR" : "INF";
+        string levelStr = entry.Level switch
+        {
+            LogLevel.Critical => "CRI",
+            LogLevel.Error => "ERR",
+            LogLevel.Warning => "WAR",
+            LogLevel.Information => "INF",
+            LogLevel.Debug => "DBG",
+            LogLevel.Trace => "TRC",
+            _ => "INF"
+        };
 
         lock (_logLock)
         {
@@ -498,7 +513,7 @@ public static class Logger
     {
         var logs = new List<LogEntry>();
         var guildDir = Path.Combine(_guildLogsDirectory, guildId.ToString());
-        
+
         if (!Directory.Exists(guildDir))
             return logs;
 
@@ -511,7 +526,7 @@ public static class Logger
             {
                 var json = await File.ReadAllTextAsync(file);
                 var fileLogs = JsonSerializer.Deserialize<List<LogEntry>>(json) ?? new List<LogEntry>();
-                
+
                 // Фильтруем по датам
                 if (fromDate.HasValue || toDate.HasValue)
                 {
@@ -520,7 +535,7 @@ public static class Logger
                         (!toDate.HasValue || log.Timestamp <= toDate.Value)
                     ).ToList();
                 }
-                
+
                 logs.AddRange(fileLogs);
             }
             catch
@@ -539,7 +554,7 @@ public static class Logger
     {
         var logs = new List<LogEntry>();
         var categoryDir = Path.Combine(_generalLogsDirectory, category.ToString());
-        
+
         if (!Directory.Exists(categoryDir))
             return logs;
 
@@ -551,7 +566,7 @@ public static class Logger
             {
                 var json = await File.ReadAllTextAsync(file);
                 var fileLogs = JsonSerializer.Deserialize<List<LogEntry>>(json) ?? new List<LogEntry>();
-                
+
                 // Фильтруем по датам
                 if (fromDate.HasValue || toDate.HasValue)
                 {
@@ -560,7 +575,7 @@ public static class Logger
                         (!toDate.HasValue || log.Timestamp <= toDate.Value)
                     ).ToList();
                 }
-                
+
                 logs.AddRange(fileLogs);
             }
             catch
