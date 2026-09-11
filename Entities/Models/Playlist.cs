@@ -4,13 +4,13 @@ using System.ComponentModel.DataAnnotations.Schema;
 namespace Entities.Models;
 
 /// <summary>
-/// Представляет плейлист музыки
+/// Represents music playlist
 /// </summary>
 [Table("Playlist")]
 public partial class Playlist : IEntity
 {
     /// <summary>
-    /// Первичный ключ
+    /// Primary key
     /// </summary>
     [Key]
     [Column("id")]
@@ -18,7 +18,7 @@ public partial class Playlist : IEntity
     public int Id { get; set; }
 
     /// <summary>
-    /// Название плейлиста
+    /// Playlist name
     /// </summary>
     [Required]
     [MaxLength(128)]
@@ -26,34 +26,34 @@ public partial class Playlist : IEntity
     public string Name { get; set; } = null!;
 
     /// <summary>
-    /// Discord ID автора плейлиста
+    /// Discord ID of playlist author
     /// </summary>
     [Required]
     [Column("Author_id", TypeName = "decimal(20,0)")]
     public ulong AuthorId { get; set; }
 
     /// <summary>
-    /// Дата создания плейлиста
+    /// Playlist creation date
     /// </summary>
     [Required]
     [Column("Creation_date", TypeName = "datetime2")]
     public DateTime CreationDate { get; set; }
 
     /// <summary>
-    /// Флаг публичности плейлиста
+    /// Playlist publicity flag
     /// </summary>
     [Required]
     [Column("Is_public")]
     public bool IsPublic { get; set; } = false;
 
     /// <summary>
-    /// Навигационное свойство: гильдии, использующие этот плейлист
+    /// Navigation property: guilds using this playlist
     /// </summary>
     [InverseProperty(nameof(Guild.Playlists))]
     public virtual ICollection<Guild> Guilds { get; set; } = new List<Guild>();
 
     /// <summary>
-    /// Навигационное свойство: песни в плейлисте
+    /// Navigation property: songs in playlist
     /// </summary>
     [InverseProperty(nameof(Song.Playlists))]
     public virtual ICollection<Song> Songs { get; set; } = new List<Song>();

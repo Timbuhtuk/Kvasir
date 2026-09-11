@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master, dev, ToatalRebuild ]
+  pull_request:
+    branches: [ main, master, dev, ToatalRebuild ]
+
+jobs:
+  build:
+    name: Build
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '10.0.x'
+
+    - name: Cache NuGet packages
+      uses: actions/cache@v4
+      with:
+        path: ~/.nuget/packages
+        key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+        restore-keys: |
+          ${{ runner.os }}-nuget-
+
+    - name: Restore dependencies
+      run: dotnet restore Kvasir.sln
+
+    - name: Check architecture boundary
+      shell: powershell
+      run: ./scripts/check-architecture.ps1
+
+    - name: Build solution
+      run: dotnet build Kvasir.sln --configuration Release --no-restore
+
+    - name: Check for build warnings
+      run: dotnet build Kvasir.sln --configuration Release --no-restore --verbosity normal | Out-File -FilePath build.log; if (Select-String -Path build.log -Pattern "warning" -Quiet) { Write-Host "Build warnings found:"; Select-String -Path build.log -Pattern "warning"; exit 1 }

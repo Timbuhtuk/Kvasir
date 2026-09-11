@@ -15,11 +15,11 @@ namespace Infrastructure.Migrations
                 name: "Guild",
                 columns: table => new
                 {
-                    id = table.Column<int>(type: "int", nullable: false)
-                        .Annotation("SqlServer:Identity", "1, 1"),
-                    Name = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: false),
-                    Discord_id = table.Column<decimal>(type: "decimal(20,0)", nullable: false),
-                    Anchor = table.Column<decimal>(type: "decimal(20,0)", nullable: true)
+                    id = table.Column<int>(type: "INTEGER", nullable: false)
+                        .Annotation("Sqlite:Autoincrement", true),
+                    Name = table.Column<string>(type: "TEXT", maxLength: 128, nullable: false),
+                    Discord_id = table.Column<ulong>(type: "decimal(20,0)", nullable: false),
+                    Anchor = table.Column<ulong>(type: "decimal(20,0)", nullable: true)
                 },
                 constraints: table =>
                 {
@@ -30,12 +30,12 @@ namespace Infrastructure.Migrations
                 name: "Playlist",
                 columns: table => new
                 {
-                    id = table.Column<int>(type: "int", nullable: false)
-                        .Annotation("SqlServer:Identity", "1, 1"),
-                    Name = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: false),
-                    Author_id = table.Column<decimal>(type: "decimal(20,0)", nullable: false),
+                    id = table.Column<int>(type: "INTEGER", nullable: false)
+                        .Annotation("Sqlite:Autoincrement", true),
+                    Name = table.Column<string>(type: "TEXT", maxLength: 128, nullable: false),
+                    Author_id = table.Column<ulong>(type: "decimal(20,0)", nullable: false),
                     Creation_date = table.Column<DateTime>(type: "datetime2", nullable: false),
-                    Is_public = table.Column<bool>(type: "bit", nullable: false)
+                    Is_public = table.Column<bool>(type: "INTEGER", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -46,14 +46,14 @@ namespace Infrastructure.Migrations
                 name: "Song",
                 columns: table => new
                 {
-                    id = table.Column<int>(type: "int", nullable: false)
-                        .Annotation("SqlServer:Identity", "1, 1"),
-                    Name = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: false),
-                    Author_name = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: false, defaultValue: "NN"),
+                    id = table.Column<int>(type: "INTEGER", nullable: false)
+                        .Annotation("Sqlite:Autoincrement", true),
+                    Name = table.Column<string>(type: "TEXT", maxLength: 128, nullable: false),
+                    Author_name = table.Column<string>(type: "TEXT", maxLength: 128, nullable: false, defaultValue: "NN"),
                     Duration = table.Column<double>(type: "float", nullable: true),
-                    Link = table.Column<string>(type: "nvarchar(256)", maxLength: 256, nullable: true),
-                    File_path = table.Column<string>(type: "nvarchar(320)", maxLength: 320, nullable: true),
-                    Views = table.Column<int>(type: "int", nullable: false)
+                    Link = table.Column<string>(type: "TEXT", maxLength: 256, nullable: true),
+                    File_path = table.Column<string>(type: "TEXT", maxLength: 320, nullable: true),
+                    Views = table.Column<int>(type: "INTEGER", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -64,8 +64,8 @@ namespace Infrastructure.Migrations
                 name: "GuildPlaylist",
                 columns: table => new
                 {
-                    GuildsId = table.Column<int>(type: "int", nullable: false),
-                    PlaylistsId = table.Column<int>(type: "int", nullable: false)
+                    GuildsId = table.Column<int>(type: "INTEGER", nullable: false),
+                    PlaylistsId = table.Column<int>(type: "INTEGER", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -88,8 +88,8 @@ namespace Infrastructure.Migrations
                 name: "SongPlaylist",
                 columns: table => new
                 {
-                    PlaylistsId = table.Column<int>(type: "int", nullable: false),
-                    SongsId = table.Column<int>(type: "int", nullable: false)
+                    PlaylistsId = table.Column<int>(type: "INTEGER", nullable: false),
+                    SongsId = table.Column<int>(type: "INTEGER", nullable: false)
                 },
                 constraints: table =>
                 {

@@ -1,25 +1,18 @@
-﻿using Discord;
-using Discord.Commands;
-using Microsoft.Extensions.Configuration;
+﻿using Microsoft.Extensions.Configuration;
+using NetCord.Rest;
+using NetCord.Services.ApplicationCommands;
 
 namespace CS_Discord_Bot.Commands;
 
-public class CommonCommands : ModuleBase<SocketCommandContext>
+/// <summary>
+/// Common commands for bot
+/// </summary>
+public class CommonCommands(IConfiguration configuration) : ApplicationCommandModule<ApplicationCommandContext>
 {
-    private readonly IConfiguration _configuration;
-
-    public CommonCommands(IConfiguration configuration)
+    [SlashCommand("help", "Show help message")]
+    public async Task HelpAsync()
     {
-        _configuration = configuration;
-    }
-
-    [Command("help", RunMode = RunMode.Async)]
-    [Summary("")]
-    [Alias("h", "р")]
-    public async Task HelpAsync(/*[Remainder] string query*/)
-    {
-        Embed embed = new EmbedBuilder().WithDescription(_configuration.GetSection("help_client")["help_message"]).Build();
-        await Context.Channel.SendMessageAsync(embed: embed);
+        var helpMessage = configuration.GetSection("help_client")["help_message"] ?? "Help message not configured";
+        await RespondAsync(InteractionCallback.Message(helpMessage));
     }
 }
-

@@ -365,8 +365,21 @@ FodyWeavers.xsd
 # MyOwn
 *.pcm
 *.mp3
-*.exe
-configuration.json
-youtubeCookies.txt
-CreatorCommands.cs
 /music
+.appdata-local/
+.dotnet-home/
+.packages/
+.dotnet10/
+.netcord-upstream/
+
+# AppData - сторонние исполняемые файлы и конфиденциальные данные
+Kvasir/appdata/ffmpeg.exe
+Kvasir/appdata/ffplay.exe
+Kvasir/appdata/ffprobe.exe
+Kvasir/appdata/yt-dlp.exe
+Kvasir/appdata/configuration.json
+Kvasir/appdata/youtubeCookies.txt
+Kvasir/appdata/DiscordMusicDB.db
+Kvasir/appdata/DiscordMusicDB.db-shm
+Kvasir/appdata/DiscordMusicDB.db-wal
+Kvasir/appdata/SavedMusic.Json

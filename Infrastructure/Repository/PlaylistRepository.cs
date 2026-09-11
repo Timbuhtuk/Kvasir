@@ -9,8 +9,7 @@ namespace Infrastructure.Repository;
 /// </summary>
 public class PlaylistRepository(DiscordMusicDBContext context) : GenericRepository<Playlist>(context), IPlaylistRepository
 {
-    public override async Task<Playlist?> GetByIdAsync(int? id)
-    {
+    public override async Task<Playlist?> GetByIdAsync(int? id) {
         if (id == null)
             return null;
 
@@ -20,28 +19,29 @@ public class PlaylistRepository(DiscordMusicDBContext context) : GenericReposito
             .FirstOrDefaultAsync(p => p.Id == id);
     }
 
-
-
-    public async Task<IQueryable<Playlist>> GetPublicPlaylistsAsync()
-    {
-        return await Task.FromResult(
+    public async Task<IQueryable<Playlist>> GetPublicPlaylistsAsync() =>
+        await Task.FromResult(
             context.Playlists
                 .Where(p => p.IsPublic)
                 .AsQueryable());
-    }
 
-    public async Task<Playlist?> GetWithSongsAsync(int id)
-    {
-        return await context.Playlists
+    public async Task<Playlist?> GetWithSongsAsync(int id) =>
+        await context.Playlists
             .Include(p => p.Songs)
             .FirstOrDefaultAsync(p => p.Id == id);
-    }
 
-    public async Task<Playlist?> GetByNameAsync(string name)
-    {
-        return await context.Playlists
+    public async Task<Playlist?> GetByNameAsync(string name) =>
+        await context.Playlists
             .Include(p => p.Songs)
             .FirstOrDefaultAsync(p => p.Name.ToLower().Trim() == name.ToLower().Trim());
+
+    public async Task<bool> RemoveByIdAsync(int id)
+    {
+        Playlist? playlist = await GetByIdAsync(id);
+        if (playlist == null)
+            return false;
+
+        await RemoveAsync(playlist);
+        return true;
     }
 }
-

@@ -9,8 +9,7 @@ namespace Infrastructure.Repository;
 /// </summary>
 public class GuildRepository(DiscordMusicDBContext context) : GenericRepository<Guild>(context), IGuildRepository
 {
-    public override async Task<Guild?> GetByIdAsync(int? id)
-    {
+    public override async Task<Guild?> GetByIdAsync(int? id) {
         if (id == null)
             return null;
 
@@ -19,17 +18,12 @@ public class GuildRepository(DiscordMusicDBContext context) : GenericRepository<
             .FirstOrDefaultAsync(g => g.Id == id);
     }
 
-    public async Task<Guild?> GetByDiscordIdAsync(ulong discordId)
-    {
-        return await context.Guilds
+    public async Task<Guild?> GetByDiscordIdAsync(ulong discordId) =>
+        await context.Guilds
             .FirstOrDefaultAsync(g => g.DiscordId == discordId);
-    }
 
-    public async Task<Guild?> GetByDiscordIdWithPlaylistsAsync(ulong discordId)
-    {
-        return await context.Guilds
+    public async Task<Guild?> GetByDiscordIdWithPlaylistsAsync(ulong discordId) =>
+        await context.Guilds
             .Include(g => g.Playlists)
             .FirstOrDefaultAsync(g => g.DiscordId == discordId);
-    }
 }
-

@@ -1,18 +1,17 @@
 ﻿using Application.Interfaces;
-using Discord;
-using Discord.Audio;
-using Discord.Commands;
-using Discord.WebSocket;
+using Application.Models;
 using Entities.Enums;
 using Entities.Models;
 using Logging;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using System.Collections.Concurrent;
-using System.Diagnostics;
-
+using System.Collections.ObjectModel;
+using System.Collections.Specialized;
+using LogLevel = Microsoft.Extensions.Logging.LogLevel;
 
 namespace Application.Services;
+
+
 
 [LogCategory(LogCategory.Music)]
 public class MusicClientService : IAsyncDisposable
@@ -20,520 +19,370 @@ public class MusicClientService : IAsyncDisposable
     #region Constants
     private const int MAX_PLAYLIST_SIZE = 23;
     private const int HISTORY_LIMIT = 10;
-    private const int BUFFER_SIZE = 81920;
-    private const int MAIN_LOOP_INTERVAL_MS = 899000;
-    private const int CONNECTION_WAIT_MS = 1000;
-    private const int PAUSE_CHECK_INTERVAL_MS = 100;
+    // 20ms аудио: 48000 Hz * 0.02 сек * 2 канала * 2 байта = 3840 байт
+    private const int BUFFER_SIZE = 3840; // Было: 81_960
+    private const int PAUSE_CHECK_INTERVAL_MS = 80;
+    private const int TRACK_TRANSITION_DELAY = 100;
     #endregion
 
     #region fields
 
-    private Guild guild;
-    private readonly IServiceScopeFactory _serviceScopeFactory;
-    private readonly DiscordSocketClient _discordClient;
-    private readonly IConfiguration _config;
-    private readonly VideoFinderService _videoFinder;
-    private readonly IAudioDownloaderService _audioDownloader;
-    private readonly IGuildRepository _guildRepository;
+    private Entities.Models.Guild guild;
+    private BotVoiceChannel? current_voice_channel;
     private readonly ISongRepository _songRepository;
     private readonly IPlaylistRepository _playlistRepository;
+    private readonly IBotConnector _connector;
+    private readonly IVideoFinderService _videoFinder;
+    private readonly IAudioDownloaderService _audioDownloader;
+    private readonly IConfiguration _config;
+    private readonly IGuildRepository _guildRepository;
     public Playlist playback_history { get; protected set; } = new Playlist() { Name = "History", Id = -1, AuthorId = 0 };
     public Playlist popular_songs { get; protected set; } = new Playlist() { Name = "Popular", Id = -2, AuthorId = 0 };
-    public List<Playlist>? saved_music { get; protected set; }
-    public KeyValuePair<IVoiceChannel, Song>? current_song { get; protected set; }
-    public IVoiceChannel? current_voice_channel { get; protected set; }
 
-    public bool is_playing { get; protected set; }
-    public bool is_paused { get; protected set; }
-    public bool on_repeat { get; protected set; }
+    public (BotVoiceChannel, Song)? current_song { get; protected set; }
+    public ObservableCollection<(BotVoiceChannel, Song)> music_queue { get; protected set; }
+
+    public PlaybackStatus playbackStatus { get; protected set; } = PlaybackStatus.None;
+    public bool on_repeat { get; protected set; } = false;
     private CancellationTokenSource SkipTokenSource { get; set; } = new CancellationTokenSource();
 
-    public ConcurrentQueue<KeyValuePair<IVoiceChannel, Song>> music_queue { get; protected set; }
 
-    public IAudioClient? audio_client { get; protected set; }
-
-    protected Process? ffmpeg;
+    public IBotVoiceConnection? audio_client { get; protected set; }
 
     public MusicViewService? music_view { get; protected set; }
 
-    public Timer MainLoop { get; protected set; }
-
     public event Func<Task>? ViewUpdateRequested;
+
+    private readonly SemaphoreSlim _playbackSemaphore = new(1, 1);
     #endregion
 
     public MusicClientService(
-        Guild guild,
-        IServiceScopeFactory serviceScopeFactory,
-        DiscordSocketClient discordClient,
-        IConfigurationRoot config,
-        VideoFinderService videoFinder,
+        Entities.Models.Guild guild,
+        IBotConnector connector,
+        IConfiguration config,
+        IVideoFinderService videoFinder,
         IAudioDownloaderService audioDownloader,
         IServiceProvider serviceProvider,
-        IGuildRepository guildRepository,
         ISongRepository songRepository,
-        IPlaylistRepository playlistRepository)
+        IGuildRepository guildRepository,
+        IPlaylistRepository playlistRepository,
+        IServiceScopeFactory serviceScopeFactory
+    )
     {
-        music_queue = new ConcurrentQueue<KeyValuePair<IVoiceChannel, Song>>();
-        saved_music = new List<Playlist>() { playback_history };
-        _audioDownloader = audioDownloader;
 
-        // Создаем MusicViewService через scope (scoped сервис)
-        // Репозитории будут автоматически инжектированы из scope
+        _connector = connector;
+        _songRepository = songRepository;
+        _playlistRepository = playlistRepository;
+        _videoFinder = videoFinder;
+        _audioDownloader = audioDownloader;
+        _config = config;
+        _guildRepository = guildRepository;
+
+        music_queue = new ObservableCollection<(BotVoiceChannel, Song)>();
+        music_queue.CollectionChanged += OnQueueCollectionChanged;
+
         music_view = ActivatorUtilities.CreateInstance<MusicViewService>(
             serviceProvider,
             this,
             serviceScopeFactory,
             guild.DiscordId,
-            discordClient);
+            connector
+        );
 
-        // Подписываем метод обновления вьюшки на событие
         ViewUpdateRequested += music_view.UpdateMusicViewAsync;
 
-        is_playing = false;
-        is_paused = false;
-        on_repeat = false;
+        this.guild = guild;
 
-        _serviceScopeFactory = serviceScopeFactory;
-        _discordClient = discordClient;
-        _config = config;
-        _videoFinder = videoFinder;
-        _guildRepository = guildRepository;
-        _songRepository = songRepository;
-        _playlistRepository = playlistRepository;
-
-        this.guild = _guildRepository.GetByDiscordIdAsync(guild.DiscordId).Result ?? guild;
-
-        // Устанавливаем контекст гильдии для всех логов этого MusicClientService
         LogContext.SetGuild(this.guild.DiscordId, this.guild.Name);
-
-        MainLoop = new System.Threading.Timer(AfterConstructCallback, null, 0, MAIN_LOOP_INTERVAL_MS);
     }
 
-    private void AfterConstructCallback(object? state)
+    private void OnQueueCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
-        _ = AfterConstructAsync();
+        if (e.Action == NotifyCollectionChangedAction.Add)
+            _ = PlayMusicAsync(SkipTokenSource.Token);
+
     }
 
-    protected async Task AfterConstructAsync()
-    {
-        try
-        {
-            await UpdateLikedMusicAsync();
-            await UpdatePopularSongsAsync();
-            await music_view!.RerenderMusicViewAsync();
-        }
-        catch (Exception ex)
-        {
-            await Logger.AddLog($"Error in AfterConstructAsync: {ex.Message}", Microsoft.Extensions.Logging.LogLevel.Error);
-        }
-    }
-
-    public async Task ClearAsync(ICommandContext context)
+    public async Task ClearAsync()
     {
         music_queue.Clear();
-        await LeaveAsync(context);
-        is_paused = false;
-        is_playing = false;
+
+        playbackStatus = PlaybackStatus.None;
         current_song = null;
-        if (ffmpeg != null)
-        {
-            ffmpeg.Kill();
-        }
+        await LeaveAsync();
     }
-    public async Task SkipAsync(ICommandContext? context = null)
+
+    public async Task SkipAsync()
     {
         await Logger.AddLog("SkipAsync called ");
-        if (on_repeat)
-        {
-            KeyValuePair<IVoiceChannel, Song> song;
-            music_queue.TryDequeue(out song);
-        }
-        if (is_playing)
+
+        if (playbackStatus != PlaybackStatus.None)
         {
             SkipTokenSource.Cancel();
-            SkipTokenSource = new CancellationTokenSource();
-        }
-        is_paused = false;
-        is_playing = false;
-        current_song = null;
-    }
-    public async Task LeaveAsync(ICommandContext? context = null)
-    {
-        if (audio_client != null)
-        {
-            await audio_client.StopAsync();
-            audio_client = null;
-        }
-    }
-    public async Task JoinAsync(IVoiceChannel channel)
-    {
-        // guildId и guildName автоматически берутся из LogContext
-        await Logger.AddLog($"JoinAsync to voice channel {channel.Name} called ");
-
-        if (audio_client != null && audio_client.ConnectionState == ConnectionState.Connected && current_voice_channel != channel)
-        {
-            await audio_client.StopAsync();
-            audio_client = await channel.ConnectAsync();
-            current_voice_channel = channel;
-        }
-        else if (audio_client != null && audio_client.ConnectionState == ConnectionState.Connecting && current_voice_channel != channel)
-        {
-            await Task.Delay(CONNECTION_WAIT_MS);
-            await audio_client.StopAsync();
-            audio_client = await channel.ConnectAsync();
-            current_voice_channel = channel;
-        }
-        else if (audio_client != null && audio_client.ConnectionState == ConnectionState.Disconnecting)
-        {
-            await Task.Delay(CONNECTION_WAIT_MS);
-            audio_client = await channel.ConnectAsync();
-            current_voice_channel = channel;
         }
         else
         {
-            audio_client = await channel.ConnectAsync();
+            playbackStatus = PlaybackStatus.None;
+            current_song = null;
+        }
+        await RequestedViewUpdateAsync();
+    }
+
+    public async Task LeaveAsync()
+    {
+        if (audio_client != null)
+        {
+            await audio_client.DisposeAsync();
+            audio_client = null;
+        }
+        await Task.CompletedTask;
+    }
+
+    public async Task<bool> JoinAsync(BotVoiceChannel channel)
+    {
+        await Logger.AddLog($"JoinAsync called for channel {channel.Name}");
+
+        // Если уже подключены к этому каналу, возвращаем успех
+        if (audio_client != null && current_voice_channel?.Id == channel.Id)
+        {
+            await Logger.AddLog("Already connected to this voice channel");
+            return true;
+        }
+
+        // Очищаем предыдущее соединение если есть
+        if (audio_client != null)
+        {
+            try
+            {
+                await audio_client.DisposeAsync();
+            }
+            catch { }
+            audio_client = null;
+        }
+        try
+        {
+            audio_client = await _connector.ConnectVoiceAsync(channel);
             current_voice_channel = channel;
+            await Logger.AddLog("Voice connected successfully");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            await Logger.AddLog($"Voice connection failed: {ex.Message}", Microsoft.Extensions.Logging.LogLevel.Error, exception: ex);
+            throw;
         }
 
     }
 
-    public async Task TogglePauseAsync(ICommandContext? context = null)
+    public async Task TogglePauseAsync()
     {
-
-        if (is_playing && !is_paused)
+        playbackStatus = playbackStatus switch
         {
-            is_paused = true;
-            is_playing = false;
-
-            await Logger.AddLog("Paused");
-        }
-        else if (is_paused)
-        {
-            is_paused = false;
-            is_playing = true;
-
-            await Logger.AddLog("Resumed");
-        }
+            PlaybackStatus.Paused => PlaybackStatus.Playing,
+            PlaybackStatus.Playing => PlaybackStatus.Paused,
+            _ => PlaybackStatus.None,
+        };
+        await Logger.AddLog(playbackStatus.ToString());
     }
-    public async Task PlayMusicAsync(CancellationToken cancellationToken)
+
+    //политика метода - если вызвали то пытаюсь играть - если что-то не так - я скипну и закроюсь а потом вызову себя же
+    public async Task PlayMusicAsync(CancellationToken skipCancellationToken)
     {
-        if (!is_playing && !is_paused && music_queue.Count > 0)
+        if (!await _playbackSemaphore.WaitAsync(100))
         {
-            KeyValuePair<IVoiceChannel, Song> channelSong = music_queue.First();
-            IVoiceChannel voiceChannel = channelSong.Key;
-            Song song = channelSong.Value;
+            return;
+        }
+        try
+        {
+            if (music_queue.Count == 0)
+            {
+                await RequestedViewUpdateAsync();
+                return;
+            }
+
+            BotVoiceChannel voiceChannel = music_queue[0].Item1;
+            Song song = music_queue[0].Item2;
 
             try
             {
                 await JoinAsync(voiceChannel);
             }
-            catch (Exception e)
+            catch
             {
-                // guildId и guildName автоматически берутся из LogContext
-                await Logger.AddLog(e.Message, Microsoft.Extensions.Logging.LogLevel.Error, exception: e);
+                await SkipAsync();
                 return;
             }
 
-            // Проверяем наличие PCM файла
-            string? pcmFilePath = song.FilePath;
-            if (string.IsNullOrEmpty(pcmFilePath) || !File.Exists(pcmFilePath))
+            Stream? pcmStream = await _songRepository.GetFileStreamAsync(song);
+            if (pcmStream == null)
             {
-                music_queue.TryDequeue(out _);
-                _ = PlayMusicAsync(SkipTokenSource.Token);
+                await SkipAsync();
                 return;
             }
 
-            using var pcmStream = new FileStream(pcmFilePath, FileMode.Open, FileAccess.Read);
-            AudioOutStream? output = audio_client?.CreatePCMStream(AudioApplication.Music, bufferMillis: 100);
-
-            is_playing = true;
-            is_paused = false;
-
-            if (!on_repeat)
-            {
-                music_queue.TryDequeue(out channelSong);
-                current_song = channelSong;
-                playback_history.Songs.Add(channelSong.Value);
-            }
-            else
-            {
-                current_song = music_queue.First();
-            }
-
-            await RequestedViewUpdateAsync();
-            await UpdatePlayHistoryAsync();
 
             try
             {
-                byte[] buffer = new byte[BUFFER_SIZE];
-                int bytesRead;
+                using (pcmStream)
+                {
+                    Stream? voiceOutStream = audio_client?.CreatePcmStream();
 
-                while ((bytesRead = await pcmStream.ReadAsync(buffer, 0, buffer.Length)) > 0)
-                {
-                    while (is_paused)
+                    if (voiceOutStream == null)
                     {
-                        await Task.Delay(PAUSE_CHECK_INTERVAL_MS);
+                        await Logger.AddLog("Failed to create output stream - audio client may be null", LogLevel.Error);
+                        await SkipAsync();
+                        return;
                     }
-                    await output.WriteAsync(buffer, 0, bytesRead);
-                    if (cancellationToken.IsCancellationRequested)
-                        break;
-                }
-                //add view to channelSong;
-                if (!cancellationToken.IsCancellationRequested)
-                {
-                    Song? songDb = await _songRepository.GetByIdAsync(current_song.Value.Value.Id);
-                    if (songDb != null)
+
+                    playbackStatus = PlaybackStatus.Playing;
+                    current_song = music_queue[0];
+
+                    if (!on_repeat)
+                        music_queue.RemoveAt(0);
+
+                    await UpdatePlayHistoryAsync();
+                    await RequestedViewUpdateAsync();
+
+                    byte[] buffer = new byte[BUFFER_SIZE];
+                    int bytesRead;
+                    var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+                    var nextPacketTime = stopwatch.ElapsedMilliseconds;
+
+                    while ((bytesRead = await pcmStream.ReadAsync(buffer, 0, buffer.Length)) > 0)
                     {
-                        songDb.Views++;
-                        await _songRepository.UpdateAsync(songDb);
-                        await UpdatePopularSongsAsync();
+                        while (playbackStatus == PlaybackStatus.Paused && !skipCancellationToken.IsCancellationRequested)
+                            await Task.Delay(PAUSE_CHECK_INTERVAL_MS);
+
+                        if (skipCancellationToken.IsCancellationRequested)
+                            break;
+
+                        await voiceOutStream.WriteAsync(buffer, 0, bytesRead);
                     }
+
+                    await voiceOutStream.FlushAsync();
+                    await voiceOutStream.DisposeAsync();
                 }
+
+                if (await _songRepository.IncrementViewsAsync(current_song.Value.Item2))
+                    await UpdatePopularSongsAsync();
             }
             catch (OperationCanceledException ex)
             {
-                await Logger.AddLog($"CanceledException during playback: {ex.Message}", Microsoft.Extensions.Logging.LogLevel.Warning);
+                await Logger.AddLog($"CanceledException during playback: {ex.Message}", LogLevel.Warning);
+                _ = RequestedViewUpdateAsync();
             }
             catch (Exception ex)
             {
-                await Logger.AddLog($"Error during playback: {ex.Message}", Microsoft.Extensions.Logging.LogLevel.Error);
+                _ = Logger.AddLog($"Error during playback: {ex.Message}", LogLevel.Error, exception: ex);
             }
             finally
             {
-                await output.FlushAsync();
                 current_song = null;
-                is_playing = false;
+                playbackStatus = PlaybackStatus.None;
+
+                if (skipCancellationToken.IsCancellationRequested)
+                {
+                    SkipTokenSource = new CancellationTokenSource();
+                    await Task.Delay(TRACK_TRANSITION_DELAY);
+                }
+
                 _ = PlayMusicAsync(SkipTokenSource.Token);
             }
-            return;
         }
-        else if (!is_playing && !is_paused && music_queue.Count == 0)
+        finally
         {
-            await RequestedViewUpdateAsync();
-            await LeaveAsync();
+            _playbackSemaphore.Release();
         }
     }
 
-
-    /// <summary>
-    /// PLay channelSong provided in query in current voice channel
-    /// </summary>
-    /// <param name="voiceChannel">object representing voice channel</param>
-    /// <param name="query">name of channelSong or Url or file name </param>
-    /// <param name="textChannel">object representing text channel, where command was called</param>
-    /// <remarks>
-    /// Find => Download (if needed) => Add to queue channelSong by query. 
-    /// This implementation use IDs and DB
-    /// </remarks>
-    /// <returns>Task</returns>
-    public async Task PlayAsync(IVoiceChannel? voiceChannel, int? song_id = null, int? playlist_id = null)
+    public async Task PlayAsync(BotVoiceChannel? voiceChannel, int? songId = null, int? playlistId = null, ulong? textChannelId = null)
     {
-        if (voiceChannel == null)
-        {
-            await Logger.AddLog("User not in voice chat", Microsoft.Extensions.Logging.LogLevel.Warning);
+        if (!await ValidateVoiceChannelAsync(voiceChannel, textChannelId))
             return;
-        }
 
-        if (song_id != null)
+        if (songId != null)
         {
-            Song? song = await _songRepository.GetByIdAsync(song_id);
+            Song? song = await _songRepository.GetByIdAsync(songId.Value);
             if (song == null)
                 return;
 
-            KeyValuePair<IVoiceChannel, Song> temp = new(voiceChannel, song);
-
-            music_queue.Enqueue(temp);
+            music_queue.Add((voiceChannel!, song));
         }
-        if (playlist_id != null)
+
+        if (playlistId != null)
         {
-            Playlist? playlist = await _playlistRepository.GetWithSongsAsync(playlist_id.Value);
+            Playlist? playlist = await _playlistRepository.GetWithSongsAsync(playlistId.Value);
             if (playlist == null)
                 return;
-            foreach (Song s in playlist.Songs)
-            {
-                KeyValuePair<IVoiceChannel, Song> temp = new(voiceChannel, s);
-                music_queue.Enqueue(temp);
-            }
-        }
-        await Logger.AddLog("Line len - " + music_queue.Count.ToString());
 
-        await PlayMusicAsync(SkipTokenSource.Token);
-        return;
+            foreach (var song in playlist.Songs)
+                music_queue.Add((voiceChannel!, song));
+        }
+
+        await Logger.AddLog($"Line len - {music_queue.Count}");
+        if (playbackStatus != PlaybackStatus.None) await RequestedViewUpdateAsync();
     }
-    /// <summary>
-    /// PLay channelSong provided in query in current voice channel
-    /// </summary>
-    /// <param name="voiceChannel">object representing voice channel</param>
-    /// <param name="query">name of channelSong or Url or file name </param>
-    /// <param name="textChannel">object representing text channel, where command was called</param>
-    /// <remarks>
-    /// Find => Download (if needed) => Add to queue channelSong by query. 
-    /// This implementation use search, DB and online search
-    /// </remarks>
-    /// <returns>Task</returns>
-    public async Task PlayAsync(IVoiceChannel? voiceChannel, string query = "", IMessageChannel? textChannel = null)
+
+    public async Task PlayAsync(BotVoiceChannel? voiceChannel, string query = "", ulong? textChannelId = null)
     {
-        if (voiceChannel == null)
-        {
-            await Logger.AddLog("User not in voice chat", Microsoft.Extensions.Logging.LogLevel.Warning);
-            if (textChannel != null)
-            {
-                await textChannel.SendMessageAsync("user not in voice");
-            }
+        if (!await ValidateVoiceChannelAsync(voiceChannel, textChannelId))
             return;
-        }
 
-        List<Song> songs;
+        List<Song>? songs = await _songRepository.GetByQueryAsync(query);
 
-        Song? song = await _songRepository.GetByNameOrLinkAsync(query);
-        Playlist? playlist = await _playlistRepository.GetByNameAsync(query);
+        if (songs == null || songs.Count == 0)
+        {
 
-        if (song != null)
-        {
-            songs = new List<Song>() { song };
-            await Logger.AddLog("used saved track instead downloading");
-        }
-        else if (playlist != null)
-        {
-            Playlist? playlistWithSongs = await _playlistRepository.GetWithSongsAsync(playlist.Id);
-            songs = playlistWithSongs?.Songs.ToList() ?? new List<Song>();
-        }
-        else
-        {
-            List<Song>? songs_info = await _videoFinder.Find(query, true);
-            if (songs_info == null)
-            {
-                if (textChannel != null)
-                {
-                    await textChannel.SendMessageAsync(embed: new EmbedBuilder()
-                        .WithDescription("q cant find that trash, мой маленький гой")
-                        .WithColor(Color.Orange)
-                        .Build()
-                    );
-                }
+            if (textChannelId == null)
                 return;
-            }
 
-            // Сначала добавляем треки в БД (если их там нет)
-            List<Song> songs_db_instances = new();
-            foreach (Song s in songs_info)
-            {
-                IQueryable<Song> songsByName = await _songRepository.GetByNameAsync(s.Name);
-                Song? inst = songsByName.FirstOrDefault(S => s.Name == S.Name && s.AuthorName == S.AuthorName);
-                if (inst == null)
-                {
-                    Song added = await _songRepository.AddAsync(s);
-                    songs_db_instances.Add(added);
-                }
-                else
-                {
-                    songs_db_instances.Add(inst);
-                }
-            }
-
-            // Параллельное скачивание с добавлением в очередь по мере готовности
-            string musicFolderPath = Path.Combine(Environment.CurrentDirectory, _config["music_folder"] ?? "music");
-            ConcurrentDictionary<int, Song?> downloadedSongs = new();
-
-            // Запускаем параллельное скачивание в фоне
-            _ = Task.Run(async () =>
-            {
-                await _audioDownloader.DownloadAsync(songs_db_instances, _songRepository, musicFolderPath, downloadedSongs);
-            });
-
-            // Отслеживаем готовые треки и добавляем в очередь по порядку
-            _ = Task.Run(async () =>
-            {
-                int nextIndex = 0;
-                while (nextIndex < songs_db_instances.Count)
-                {
-                    if (downloadedSongs.TryGetValue(nextIndex, out Song? downloadedSong))
-                    {
-                        if (downloadedSong != null)
-                        {
-                            KeyValuePair<IVoiceChannel, Song> temp = new(voiceChannel, downloadedSong);
-                            music_queue.Enqueue(temp);
-                            await Logger.AddLog($"Added to queue: {downloadedSong.Name}");
-                        }
-                        nextIndex++;
-                    }
-                    else
-                    {
-                        // Ждем немного перед следующей проверкой
-                        await Task.Delay(100);
-                    }
-                }
-
-                await Logger.AddLog("All songs processed for queue");
-                // Вызываем событие обновления вьюшки
-                await RequestedViewUpdateAsync();
-            });
-
-            // Запускаем воспроизведение, если очередь пуста (будет ждать первого трека)
-            if (music_queue.IsEmpty)
-            {
-                _ = PlayMusicAsync(SkipTokenSource.Token);
-            }
+            await _connector.SendMessageAsync(textChannelId.Value, new BotMessageContent("q cant find that trash, мой маленький гой"));
             return;
         }
 
-
-
-
-
-        foreach (Song s in songs)
+        foreach (Song song in songs)
         {
-            KeyValuePair<IVoiceChannel, Song> temp = new(voiceChannel, s);
-            music_queue.Enqueue(temp);
+            _ = Logger.AddLog($"Added to queue: {song.Name}");
+            music_queue.Add((voiceChannel!, song));
         }
+        _ = Logger.AddLog($"Line len - {music_queue.Count}");
+        if (playbackStatus != PlaybackStatus.None) await RequestedViewUpdateAsync();
+    }
 
-        await Logger.AddLog("Line len - " + music_queue.Count.ToString());
-        await RequestedViewUpdateAsync();
 
-        await PlayMusicAsync(SkipTokenSource.Token);
-        return;
-    }
-    public async Task PlayAsync(ICommandContext ctx, string query)
+    private async Task<bool> ValidateVoiceChannelAsync(BotVoiceChannel? voiceChannel, ulong? textChannelId = null)
     {
-        await PlayAsync((ctx.User as IGuildUser).VoiceChannel, query, ctx.Channel as ITextChannel);
+        if (voiceChannel != null)
+            return true;
+
+        await Logger.AddLog("User not in voice chat", Microsoft.Extensions.Logging.LogLevel.Warning);
+
+        if (textChannelId != null)
+            await _connector.SendMessageAsync(textChannelId.Value, new BotMessageContent("user not in voice"));
+
+        return false;
     }
-    public async Task PlayAsync(ICommandContext ctx)
-    {
-        await TogglePauseAsync(ctx);
-    }
-    public async Task SetAnchorAsync(ICommandContext context)
-    {
-        Guild? guildEntity = await _guildRepository.GetByIdAsync(guild.Id);
-        if (guildEntity != null)
-        {
-            guildEntity.Anchor = context.Channel.Id;
-            await _guildRepository.UpdateAsync(guildEntity);
-            guild = guildEntity;
-            await Logger.AddLog($"Anchor for {guild.Name} is now {context.Channel.Name}");
-        }
-    }
+
+
+
+
     protected async Task UpdatePlayHistoryAsync()
     {
         if (current_song == null)
             return;
 
         int history_limit = HISTORY_LIMIT;
-        Song song = current_song.Value.Value;
+        Song song = current_song.Value.Item2;
         if (!playback_history.Songs.Select(s => s.Id).Contains(song.Id))
-        {
             playback_history.Songs.Add(song);
-        }
-        ;
         while (playback_history.Songs.Count > history_limit)
-        {
             playback_history.Songs.Remove(playback_history.Songs.Last());
-        }
         await Logger.AddLog("Playback updated");
     }
 
     public async Task<bool> ToggleMusicLikeAsync(int? playlistId, int? songId = null)
     {
-        songId = current_song?.Value.Id;
+        songId = current_song?.Item2.Id;
 
         if (songId == null || playlistId == null)
             return false;
@@ -549,7 +398,7 @@ public class MusicClientService : IAsyncDisposable
             playlist.Songs.Remove(song);
             await Logger.AddLog($"{song.Name} removed from favorite on guild {guild.DiscordId}");
         }
-        else if (playlist.Songs.Count == MAX_PLAYLIST_SIZE)//limit 25, -2 reserved options in every selector
+        else if (playlist.Songs.Count == MAX_PLAYLIST_SIZE)
         {
             await Logger.AddLog($"{song.Name} did not add to favorite on guild {guild.DiscordId} to much favorite");
             return false;
@@ -561,133 +410,285 @@ public class MusicClientService : IAsyncDisposable
         }
 
         await _playlistRepository.UpdateAsync(playlist);
-
         return true;
     }
+
     public async Task<bool> AddPlaylistAsync(string? playlist_name, ulong? author_id)
     {
         await Logger.AddLog($"AddPlaylistAsync called, playlist name: {playlist_name}");
 
-        if (guild.Playlists.Count == MAX_PLAYLIST_SIZE)
-        {
-            await Logger.AddLog("Playlist not added - guild lists count overflow", Microsoft.Extensions.Logging.LogLevel.Warning);
-            return false;
-        }
-
         if (playlist_name == null || author_id == null)
         {
-            await Logger.AddLog("Playlist or author Id == null", Microsoft.Extensions.Logging.LogLevel.Warning);
+            await Logger.AddLog("Playlist name or author Id is null", LogLevel.Warning);
             return false;
         }
 
-        bool playlistExists = guild.Playlists.Select(p => p.Name).Any(name => name == playlist_name);
+        // Get guild with playlists
+        Entities.Models.Guild? guildWithPlaylists = await _guildRepository.GetByDiscordIdWithPlaylistsAsync(guild.DiscordId);
+        if (guildWithPlaylists == null)
+        {
+            await Logger.AddLog("Guild not found", LogLevel.Warning);
+            return false;
+        }
 
+        // Check if playlist limit reached
+        if (guildWithPlaylists.Playlists.Count >= MAX_PLAYLIST_SIZE)
+        {
+            await Logger.AddLog("Playlist not added - guild lists count overflow", LogLevel.Warning);
+            return false;
+        }
+
+        // Check if playlist already exists
+        bool playlistExists = guildWithPlaylists.Playlists.Any(p => p.Name == playlist_name);
         if (playlistExists)
         {
-            await Logger.AddLog("Playlist already exist", Microsoft.Extensions.Logging.LogLevel.Warning);
+            await Logger.AddLog("Playlist already exists", LogLevel.Warning);
             return false;
         }
-        Playlist playlist_entity;
 
-        List<Song>? found_songs = await _videoFinder.FindPlaylistByLink(playlist_name, true);
-        if (found_songs != null)
+        // Find songs using VideoFinderService
+        List<FinderSongDTO>? foundSongs = await _videoFinder.Find(playlist_name, true);
+
+        Playlist playlistEntity;
+        if (foundSongs != null && foundSongs.Count > 0)
         {
-            List<Song> song_list = found_songs?.Take(MAX_PLAYLIST_SIZE).ToList() ?? new List<Song>();
+            // Get playlist name (if URL provided)
+            string playlistDisplayName = await _videoFinder.GetPlaylistName(playlist_name) ?? playlist_name;
 
-            List<Song> song_db_instances = new();
-
-            foreach (Song s in song_list)
+            // Create playlist entity
+            playlistEntity = new Playlist
             {
-                IQueryable<Song> songsByName = await _songRepository.GetByNameAsync(s.Name);
-                Song? inst = songsByName.FirstOrDefault(S => s.Name == S.Name && s.AuthorName == S.AuthorName);
-                if (inst == null)
-                {
-                    Song added = await _songRepository.AddAsync(s);
-                    song_db_instances.Add(added);
-                }
-                else
-                {
-                    song_db_instances.Add(inst);
-                }
-            }
-
-            // Параллельное скачивание файлов для треков плейлиста
-            string musicFolderPath = Path.Combine(Environment.CurrentDirectory, _config["music_folder"] ?? "music");
-            ConcurrentDictionary<int, Song?> downloadedSongs = new();
-
-            // Создаем плейлист сразу (будет обновляться по мере добавления треков)
-            playlist_entity = new Playlist
-            {
-                Name = await _videoFinder.GetPlaylistName(playlist_name) ?? playlist_name,
+                Name = playlistDisplayName,
                 Songs = new List<Song>(),
                 AuthorId = author_id.Value
             };
-            playlist_entity = await _playlistRepository.AddAsync(playlist_entity);
+            playlistEntity = await _playlistRepository.AddAsync(playlistEntity);
 
-            // Запускаем параллельное скачивание в фоне
+            // Process songs asynchronously
             _ = Task.Run(async () =>
             {
-                await _audioDownloader.DownloadAsync(song_db_instances, _songRepository, musicFolderPath, downloadedSongs);
-            });
-
-            // Отслеживаем готовые треки и добавляем в плейлист по порядку
-            _ = Task.Run(async () =>
-            {
-                int nextIndex = 0;
-                while (nextIndex < song_db_instances.Count)
+                try
                 {
-                    if (downloadedSongs.TryGetValue(nextIndex, out Song? downloadedSong))
+                    List<Song> songDbInstances = new();
+
+                    // Get or create songs in database
+                    foreach (var finderSong in foundSongs.Take(MAX_PLAYLIST_SIZE))
                     {
-                        if (downloadedSong != null)
+                        // Try to find existing song by query (searches by name and link)
+                        var existingSongs = await _songRepository.GetByQueryAsync(finderSong.Link ?? finderSong.Name);
+                        Song? existingSong = existingSongs?.FirstOrDefault(s =>
+                            (s.Link == finderSong.Link && !string.IsNullOrEmpty(finderSong.Link)) ||
+                            (s.Name == finderSong.Name && s.AuthorName == finderSong.AuthorName));
+
+                        if (existingSong != null)
                         {
-                            // Обновляем плейлист в БД, добавляя новый трек
-                            // Используем GetWithSongsAsync для загрузки навигационных свойств
-                            Playlist? currentPlaylist = await _playlistRepository.GetWithSongsAsync(playlist_entity.Id);
-                            if (currentPlaylist != null)
+                            songDbInstances.Add(existingSong);
+                        }
+                        else
+                        {
+                            // Create new song from FinderSongDTO
+                            Song newSong = new()
                             {
-                                if (!currentPlaylist.Songs.Any(s => s.Id == downloadedSong.Id))
+                                Name = finderSong.Name,
+                                AuthorName = finderSong.AuthorName,
+                                Link = finderSong.Link,
+                                Duration = finderSong.Duration ?? 0
+                            };
+                            Song added = await _songRepository.AddAsync(newSong);
+                            songDbInstances.Add(added);
+                        }
+                    }
+
+                    // Download songs
+                    string musicFolderPath = Path.Combine(Environment.CurrentDirectory, _config["music_client:music_folder"] ?? "music");
+                    foreach (var song in songDbInstances)
+                    {
+                        await _audioDownloader.DownloadAsync(song);
+                    }
+
+                    // Add songs to playlist
+                    Playlist? currentPlaylist = await _playlistRepository.GetWithSongsAsync(playlistEntity.Id);
+                    if (currentPlaylist != null)
+                    {
+                        foreach (var song in songDbInstances)
+                        {
+                            if (!currentPlaylist.Songs.Any(s => s.Id == song.Id))
+                            {
+                                currentPlaylist.Songs.Add(song);
+
+                                // Truncate if exceeds limit
+                                if (currentPlaylist.Songs.Count > MAX_PLAYLIST_SIZE)
                                 {
-                                    currentPlaylist.Songs.Add(downloadedSong);
-                                    await _playlistRepository.UpdateAsync(currentPlaylist);
-                                    await Logger.AddLog($"Added to playlist: {downloadedSong.Name}");
+                                    int excessCount = currentPlaylist.Songs.Count - MAX_PLAYLIST_SIZE;
+                                    List<Song> songsList = currentPlaylist.Songs.ToList();
+                                    for (int i = 0; i < excessCount; i++)
+                                        currentPlaylist.Songs.Remove(songsList[i]);
+                                    await Logger.AddLog($"Playlist truncated to {MAX_PLAYLIST_SIZE} tracks (removed {excessCount} oldest tracks)");
                                 }
+
+                                await _playlistRepository.UpdateAsync(currentPlaylist);
+                                await Logger.AddLog($"Added to playlist: {song.Name}");
                             }
                         }
-                        nextIndex++;
                     }
-                    else
-                    {
-                        // Ждем немного перед следующей проверкой
-                        await Task.Delay(100);
-                    }
-                }
 
-                await Logger.AddLog("All songs processed for playlist");
+                    await Logger.AddLog("All songs processed for playlist");
+                }
+                catch (Exception ex)
+                {
+                    await Logger.AddLog($"Error processing playlist songs: {ex.Message}", LogLevel.Error, exception: ex);
+                }
             });
         }
         else
         {
-            // Если плейлист не найден по ссылке, создаем пустой
-            playlist_entity = new Playlist
+            // Create empty playlist
+            playlistEntity = new Playlist
             {
                 Name = playlist_name,
                 AuthorId = author_id.Value
             };
-            playlist_entity = await _playlistRepository.AddAsync(playlist_entity);
+            playlistEntity = await _playlistRepository.AddAsync(playlistEntity);
         }
 
-        Guild? guildWithPlaylists = await _guildRepository.GetByDiscordIdWithPlaylistsAsync(guild.DiscordId);
-        if (guildWithPlaylists != null)
-        {
-            guildWithPlaylists.Playlists.Add(playlist_entity);
-            await _guildRepository.UpdateAsync(guildWithPlaylists);
-            guild = guildWithPlaylists;
-        }
+        // Add playlist to guild
+        guildWithPlaylists.Playlists.Add(playlistEntity);
+        await _guildRepository.UpdateAsync(guildWithPlaylists);
+        guild = guildWithPlaylists;
 
-        await UpdateLikedMusicAsync();
         await RequestedViewUpdateAsync();
         return true;
+        //await Logger.AddLog($"AddPlaylistAsync called, playlist name: {playlist_name}");
+
+        //if (guild.Playlists.Count == MAX_PLAYLIST_SIZE)
+        //{
+        //    await Logger.AddLog("Playlist not added - guild lists count overflow", LogLevel.Warning);
+        //    return false;
+        //}
+
+        //if (playlist_name == null || author_id == null)
+        //{
+        //    await Logger.AddLog("Playlist or author Id == null", LogLevel.Warning);
+        //    return false;
+        //}
+
+        //bool playlistExists = guild.Playlists.Select(p => p.Name).Any(name => name == playlist_name);
+
+        //if (playlistExists)
+        //{
+        //    await Logger.AddLog("Playlist already exist", LogLevel.Warning);
+        //    return false;
+        //}
+        //Playlist playlist_entity;
+
+        //List<Song>? found_songs = await _videoFinder.Find(playlist_name, true);
+        //if (found_songs != null)
+        //{
+        //    List<Song> song_list = found_songs?.Take(MAX_PLAYLIST_SIZE).ToList() ?? new List<SongO>();
+
+        //    List<Song> song_db_instances = new();
+
+        //    foreach (Song s in song_list)
+        //    {
+        //        IQueryable<Song> songsByName = await _songRepository.GetByNameAsync(s.Name);
+        //        FinderSongDTO? inst = songsByName.FirstOrDefault(S => s.Name == S.Name && s.AuthorName == S.AuthorName);
+        //        if (inst == null)
+        //        {
+        //            FinderSongDTO added = await _songRepository.AddAsync(s);
+        //            song_db_instances.Add(added);
+        //        }
+        //        else
+        //            song_db_instances.Add(inst);
+        //    }
+
+        //    string musicFolderPath = Path.Combine(Environment.CurrentDirectory, config["music_folder"] ?? "music");
+        //    ConcurrentDictionary<int, Song?> downloadedSongs = new();
+
+        //    playlist_entity = new Playlist
+        //    {
+        //        Name = await _videoFinder.GetPlaylistName(playlist_name) ?? playlist_name,
+        //        Songs = new List<Song>(),
+        //        AuthorId = author_id.Value
+        //    };
+        //    playlist_entity = await _playlistRepository.AddAsync(playlist_entity);
+
+        //    _ = Task.Run(async () =>
+        //    {
+        //        await _audioDownloader.DownloadAsync(song_db_instances, _songRepository, musicFolderPath, downloadedSongs);
+        //    });
+
+        //    _ = Task.Run(async () =>
+        //    {
+        //        int nextIndex = 0;
+        //        while (nextIndex < song_db_instances.Count)
+        //        {
+        //            if (downloadedSongs.TryGetValue(nextIndex, out FinderSongDTO? downloadedSong))
+        //            {
+        //                if (downloadedSong != null)
+        //                {
+        //                    Playlist? currentPlaylist = await _playlistRepository.GetWithSongsAsync(playlist_entity.Id);
+        //                    if (currentPlaylist != null)
+        //                    {
+        //                        if (!currentPlaylist.Songs.Any(s => s.Id == downloadedSong.Id))
+        //                        {
+        //                            currentPlaylist.Songs.Add(downloadedSong);
+
+        //                            if (currentPlaylist.Songs.Count > MAX_PLAYLIST_SIZE)
+        //                            {
+        //                                int excessCount = currentPlaylist.Songs.Count - MAX_PLAYLIST_SIZE;
+        //                                List<FinderSongDTO> songsList = currentPlaylist.Songs.ToList();
+        //                                for (int i = 0; i < excessCount; i++)
+        //                                    currentPlaylist.Songs.Remove(songsList[i]);
+        //                                await Logger.AddLog($"Playlist truncated to {MAX_PLAYLIST_SIZE} tracks (removed {excessCount} oldest tracks)");
+
+        //                                if (_ephemeralMessageService != null && interaction != null)
+        //                                {
+        //                                    await _ephemeralMessageService.SendEphemeralAsync(
+        //                                        interaction,
+        //                                        new EmbedBuilder()
+        //                                            .WithDescription($"Плейлист усечен до {MAX_PLAYLIST_SIZE} треков. Удалено {excessCount} самых старых треков.")
+        //                                            .WithColor(Color.Orange)
+        //                                            .Build()
+        //                                    );
+        //                                }
+        //                            }
+
+        //                            await _playlistRepository.UpdateAsync(currentPlaylist);
+        //                            await Logger.AddLog($"Added to playlist: {downloadedSong.Name}");
+        //                        }
+        //                    }
+        //                }
+        //                nextIndex++;
+        //            }
+        //            else
+        //                await Task.Delay(100);
+        //        }
+
+        //        await Logger.AddLog("All songs processed for playlist");
+        //    });
+        //}
+        //else
+        //{
+        //    playlist_entity = new Playlist
+        //    {
+        //        Name = playlist_name,
+        //        AuthorId = author_id.Value
+        //    };
+        //    playlist_entity = await _playlistRepository.AddAsync(playlist_entity);
+        //}
+
+        //Guild? guildWithPlaylists = await guildRepository.GetByDiscordIdWithPlaylistsAsync(guild.DiscordId);
+        //if (guildWithPlaylists != null)
+        //{
+        //    guildWithPlaylists.Playlists.Add(playlist_entity);
+        //    await guildRepository.UpdateAsync(guildWithPlaylists);
+        //    guild = guildWithPlaylists;
+        //}
+
+        //await RequestedViewUpdateAsync();
+        //return true;
     }
+
     public async Task UpdatePopularSongsAsync()
     {
         popular_songs.Songs.Clear();
@@ -695,68 +696,38 @@ public class MusicClientService : IAsyncDisposable
         popular_songs.Songs = songs;
         await Task.CompletedTask;
     }
-    public async Task<bool> RemovePlaylistAsync(int playlist_id)
-    {
-        await Logger.AddLog($"RemovePlaylistAsync called, playlist id: {playlist_id}");
 
-        Playlist? playlist = await _playlistRepository.GetByIdAsync(playlist_id);
-
-        if (playlist == null)
-            return false;
-        await _playlistRepository.RemoveAsync(playlist);
-        await UpdateLikedMusicAsync();
-        return true;
-    }
-    public async Task UpdateLikedMusicAsync()
-    {
-        Guild? guildWithPlaylists = await _guildRepository.GetByDiscordIdWithPlaylistsAsync(guild.DiscordId);
-        if (guildWithPlaylists != null)
-        {
-            guild = guildWithPlaylists;
-            List<Playlist> playlists = guild.Playlists.ToList();
-
-            saved_music = playlists;
-            saved_music.Add(playback_history);
-            saved_music.Add(popular_songs);
-            await Logger.AddLog("Saved music updated");
-        }
-    }
     public async Task ToggleRepeatAsync()
     {
         if (on_repeat)
         {
-            KeyValuePair<IVoiceChannel, Song> song;
-            music_queue.TryDequeue(out song);
+            if (music_queue.Count > 0)
+                music_queue.RemoveAt(0);
             await Logger.AddLog("Repeat: off");
         }
         else
         {
             if (current_song != null)
-                music_queue.Enqueue(current_song.Value);
+                music_queue.Add(current_song.Value);
             await Logger.AddLog("Repeat: on");
         }
 
         this.on_repeat = !this.on_repeat;
-
     }
 
-    /// <summary>
-    /// Вызывает событие обновления вьюшки
-    /// </summary>
-    protected async Task RequestedViewUpdateAsync()
-    {
-
-        await ViewUpdateRequested.Invoke();
-    }
+    protected async Task RequestedViewUpdateAsync() => await ViewUpdateRequested?.Invoke()!;
 
     public async ValueTask DisposeAsync()
     {
-        if (ffmpeg != null)
-            ffmpeg.Dispose();
+
         if (audio_client != null)
-            audio_client.Dispose();
+            await audio_client.DisposeAsync();
         if (music_view != null)
+        {
+            music_view.DisposeAutoUpdateTimer();
             await music_view.DeleteViewMessageAsync();
+        }
+        _playbackSemaphore?.Dispose();
         return;
     }
 }

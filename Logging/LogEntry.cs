@@ -5,7 +5,7 @@ using System.Text.Json.Serialization;
 namespace Logging;
 
 /// <summary>
-/// Структурированная запись лога для сохранения и обработки
+/// Structured log entry for storage and processing
 /// </summary>
 public class LogEntry
 {
@@ -45,4 +45,3 @@ public class LogEntry
     [JsonPropertyName("depth")]
     public int Depth { get; set; }
 }
-

@@ -1,6 +1,6 @@
-﻿using Application.Interfaces;
-using Discord;
-using Discord.WebSocket;
+using Application.Interfaces;
+using Application.Models;
+using Entities.Enums;
 using Entities.Models;
 using Logging;
 using Microsoft.Extensions.DependencyInjection;
@@ -10,523 +10,348 @@ using System.Text;
 namespace Application.Services;
 
 /// <summary>
-/// Class represents discord component creator for bot music player
+/// Builds a platform-independent music view. Rendering is delegated to IBotConnector.
 /// </summary>
 public class MusicViewService
 {
+    private const int AUTO_UPDATE_INTERVAL_MS = 899000;
+    private const int MAX_PLAYLIST_SIZE = 23;
+    private const string PLAYING_ICON_URL = "https://media0.giphy.com/media/v1.Y2lkPTc5MGI3NjExMHpuNm8ycXdiaTRkem81ZHN6M2w5MDdibnVrNmZ3MHhxNjIwa3VyNCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9cw/vJHNq9tziq9C3HMrIB/giphy.gif";
+
     protected readonly MusicClientService _music_client;
     protected readonly IServiceScopeFactory _serviceScopeFactory;
     protected readonly ulong _guildDiscordId;
-    protected readonly IGuildRepository _guildRepository;
-    protected readonly IPlaylistRepository _playlistRepository;
-    protected readonly DiscordSocketClient _discordClient;
-    protected Playlist current_playlist;
-    public IMessage? view_message;
-    protected readonly SemaphoreSlim _semaphoreSlim = new(1, 1);
+    protected readonly IBotConnector _connector;
+    protected readonly SemaphoreSlim _renderSemaphore = new(1, 1);
+
+    private readonly SemaphoreSlim _autoUpdateSemaphore = new(1, 1);
     private readonly HashSet<ulong> _deletedMessageIds = new();
+    private readonly Timer _autoUpdateTimer;
+    private ulong? _viewMessageId;
+    private ulong? _viewChannelId;
+
+    public Playlist current_playlist;
 
     public MusicViewService(
         MusicClientService music_client,
         IServiceScopeFactory serviceScopeFactory,
         ulong guildDiscordId,
-        IGuildRepository guildRepository,
-        IPlaylistRepository playlistRepository,
-        DiscordSocketClient discordClient)
+        IBotConnector connector)
     {
         _music_client = music_client;
         _serviceScopeFactory = serviceScopeFactory;
         _guildDiscordId = guildDiscordId;
-        _guildRepository = guildRepository;
-        _playlistRepository = playlistRepository;
-        _discordClient = discordClient;
-        // По умолчанию устанавливаем History плейлист
+        _connector = connector;
         current_playlist = music_client.playback_history;
+
+        _autoUpdateTimer = new Timer(AutoUpdateCallback, null, AUTO_UPDATE_INTERVAL_MS, AUTO_UPDATE_INTERVAL_MS);
     }
 
+    private void AutoUpdateCallback(object? state) => _ = AutoUpdateAsync();
 
-    public async Task<MessageComponent> CreateComponent()
+    private async Task AutoUpdateAsync()
     {
-        ComponentBuilder builder = new();
+        if (!await _autoUpdateSemaphore.WaitAsync(0))
+            return;
 
-        // Загружаем текущий плейлист с песнями, если это не виртуальный плейлист
-        if (current_playlist.Id > 0)
+        try
         {
-            Playlist? loadedPlaylist = await _playlistRepository.GetByIdAsync(current_playlist.Id);
-            if (loadedPlaylist != null)
-                current_playlist = loadedPlaylist;
+            using IServiceScope scope = _serviceScopeFactory.CreateScope();
+            ISongRepository songRepository = scope.ServiceProvider.GetRequiredService<ISongRepository>();
+            List<Song> songs = await songRepository.GetPopularSongsListAsync(MAX_PLAYLIST_SIZE);
+
+            _music_client.popular_songs.Songs.Clear();
+            _music_client.popular_songs.Songs = songs;
+
+            await RerenderMusicViewAsync();
         }
-
-        List<SelectMenuOptionBuilder> songs_list_items = new();
-        if (current_playlist.Songs.Count > 0)
+        catch (Exception ex)
         {
+            await Logger.AddLog($"Error in AutoUpdateAsync: {ex.Message}", LogLevel.Error, exception: ex);
+        }
+        finally
+        {
+            _autoUpdateSemaphore.Release();
+        }
+    }
+
+    public async Task<List<BotComponent>> CreateComponentsAsync()
+    {
+        List<BotSelectOption> songs = new();
+        List<BotSelectOption> playlists = new();
+
+        using (IServiceScope scope = _serviceScopeFactory.CreateScope())
+        {
+            IPlaylistRepository playlistRepository = scope.ServiceProvider.GetRequiredService<IPlaylistRepository>();
+            IGuildRepository guildRepository = scope.ServiceProvider.GetRequiredService<IGuildRepository>();
+
+            if (current_playlist.Id > 0)
+            {
+                Playlist? loadedPlaylist = await playlistRepository.GetWithSongsAsync(current_playlist.Id);
+                if (loadedPlaylist != null)
+                    current_playlist = loadedPlaylist;
+            }
+
+            if (current_playlist.Songs.Count > 0)
+            {
+                if (current_playlist.Id is not (-1) and not (-2))
+                    songs.Add(new BotSelectOption("run all", "run all"));
+
+                foreach (Song song in current_playlist.Songs)
+                    songs.Add(new BotSelectOption(song.Name, song.Id.ToString()));
+            }
+
             if (current_playlist.Id is not (-1) and not (-2))
-                songs_list_items.Add(new SelectMenuOptionBuilder("run all", "run all"));
-            foreach (Song song in current_playlist.Songs)
-            {
-                songs_list_items.Add(new SelectMenuOptionBuilder(song.Name, song.Id.ToString()));
-            }
+                songs.Add(new BotSelectOption("delete list", "delete list"));
+
+            Entities.Models.Guild? guild = await guildRepository.GetByDiscordIdWithPlaylistsAsync(_guildDiscordId);
+            List<Playlist> guildPlaylists = guild?.Playlists.ToList() ?? new List<Playlist>();
+            guildPlaylists.Add(_music_client.playback_history);
+            guildPlaylists.Add(_music_client.popular_songs);
+
+            for (int q = guildPlaylists.Count - 1; q >= 0; q--)
+                playlists.Add(new BotSelectOption(guildPlaylists[q].Name, guildPlaylists[q].Id.ToString()));
         }
-        if (current_playlist.Id is not (-1) and not (-2))
-            songs_list_items.Add(new SelectMenuOptionBuilder("delete list", "delete list"));
 
-        // Получаем плейлисты из БД
-        List<SelectMenuOptionBuilder> playlists_list_items = new();
-        Guild? guild = await _guildRepository.GetByDiscordIdWithPlaylistsAsync(_guildDiscordId);
-
-        if (guild != null)
+        List<BotComponent> components = new();
+        List<BotComponent> buttons = new()
         {
-            List<Playlist> playlists = guild.Playlists.ToList();
-            // Добавляем виртуальные плейлисты
-            playlists.Add(_music_client.playback_history);
-            playlists.Add(_music_client.popular_songs);
+            new BotButton("LIKE", GetLikeButtonLabel(), GetLikeButtonStyle(), GetLikeButtonDisabled()),
+            new BotButton("PAUSE_UNPAUSE", GetPauseUnpauseLabel(), GetPauseUnpauseStyle()),
+            new BotButton("FORWARD", "▶▶|", GetForwardButtonStyle()),
+            new BotButton("REPEAT", "⟳", GetRepeatButtonStyle()),
+            new BotButton("ADDPLAYLIST", "+new playlist", BotButtonStyle.Success),
+        };
 
-            for (int q = playlists.Count - 1; q >= 0; q--)
-            {
-                playlists_list_items.Add(new SelectMenuOptionBuilder(playlists[q].Name, playlists[q].Id.ToString()));
-            }
-        }
-        else
+        components.Add(new BotComponentRow(buttons));
+
+        if (playlists.Count > 0)
+            components.Add(new BotSelect("PLAYLIST_MENU", current_playlist.Name, playlists));
+
+        if (songs.Count > 0)
+            components.Add(new BotSelect("SONGS_MENU", "playlist content", songs));
+
+        return components;
+    }
+
+    public async Task RerenderMusicViewAsync(ulong? channelId = null)
+    {
+        if (!await _renderSemaphore.WaitAsync(0))
+            return;
+
+        try
         {
-            // Если гильдия не найдена, добавляем только виртуальные плейлисты
-            playlists_list_items.Add(new SelectMenuOptionBuilder(_music_client.playback_history.Name, _music_client.playback_history.Id.ToString()));
-            playlists_list_items.Add(new SelectMenuOptionBuilder(_music_client.popular_songs.Name, _music_client.popular_songs.Id.ToString()));
+            await DeleteViewMessageCoreAsync();
+            await EnsureViewMessageAsync(channelId);
         }
-
-
-
-        builder.WithButton(GetLikeButtonLabel(), "LIKE", GetLikeButtonStyle(), disabled: _music_client.current_song == null || !_music_client.current_song.HasValue || current_playlist.Id == -1);
-        builder.WithButton(GetPauseUnpauseLabel(), "PAUSE_UNPAUSE", GetPauseUnpauseStyle());
-        builder.WithButton("▶▶|", "FORWARD", GetForwardButtonStyle());
-        builder.WithButton(GetRepeatButtonLabel(), "REPEAT", GetRepeatButtonStyle());
-        builder.WithButton(GetAddPlaylistlabel(), "ADDPLAYLIST", GetAddPlaylistStyle());
-
-
-
-
-        if (playlists_list_items.Count > 0)
-            builder.WithSelectMenu("PLAYLIST_MENU", playlists_list_items, row: 1, placeholder: current_playlist.Name);
-
-        if (songs_list_items.Count > 0)
-            builder.WithSelectMenu("SONGS_MENU", songs_list_items, row: 2, placeholder: "playlist content");
-
-
-        return builder.Build();
-
-    }
-
-    protected string GetAddPlaylistlabel()
-    {
-        return "+new playlist";
-    }
-    protected ButtonStyle GetAddPlaylistStyle()
-    {
-        return ButtonStyle.Success;
-    }
-
-    protected string GetLikeButtonLabel()
-    {
-        if (_music_client.current_song == null || !_music_client.current_song.HasValue)
-            return "X";
-
-        Song song = _music_client.current_song.Value.Value;
-        if (!current_playlist.Songs.Select(s => s.Id).Contains(song.Id))
-            return "💚";
-        else
-            return "🤍";
-    }
-    protected ButtonStyle GetLikeButtonStyle()
-    {
-        if (_music_client.current_song == null || !_music_client.current_song.HasValue)
-            return ButtonStyle.Secondary;
-
-        Song song = _music_client.current_song.Value.Value;
-        if (!current_playlist.Songs.Select(s => s.Id).Contains(song.Id))
-            return ButtonStyle.Secondary;
-        else
-            return ButtonStyle.Success;
-    }
-
-    protected string GetPauseUnpauseLabel()
-    {
-        return _music_client.is_playing ? "||" : "▶";
-    }
-    protected ButtonStyle GetPauseUnpauseStyle()
-    {
-        return _music_client.is_paused ? ButtonStyle.Danger : ButtonStyle.Primary;
-    }
-
-    protected ButtonStyle GetForwardButtonStyle()
-    {
-        return _music_client.music_queue.Count > 0 ? ButtonStyle.Primary : ButtonStyle.Secondary;
-    }
-
-    protected string GetRepeatButtonLabel()
-    {
-        return "⟳";
-    }
-    protected ButtonStyle GetRepeatButtonStyle()
-    {
-        return _music_client.on_repeat ? ButtonStyle.Success : ButtonStyle.Secondary;
-    }
-
-
-    public async Task HandleComponent(SocketMessageComponent component)
-    {
-        switch (component.Data.CustomId)
+        catch (Exception ex)
         {
-            case "LIKE":
-                await component.DeferAsync();
-                bool toggle_result = await _music_client.ToggleMusicLikeAsync(current_playlist.Id);
-                if (!toggle_result)
-                {
-                    await component.FollowupAsync(embed: new EmbedBuilder().WithDescription("limit of saved music is 23 tracks").WithColor(Color.Orange).Build(), ephemeral: true);
-                }
-                else
-                {
-                    await _music_client.UpdateLikedMusicAsync();
-                    // Загружаем обновленный плейлист из БД
-                    Playlist? updatedPlaylist = await _playlistRepository.GetByIdAsync(current_playlist.Id);
-                    if (updatedPlaylist != null)
-                        current_playlist = updatedPlaylist;
-                }
-
-
-                break;
-            case "ADDPLAYLIST":
-                Modal mb = new ModalBuilder()
-                .WithTitle("Add playlist")
-                .WithCustomId("ADDPLAYLISTMODAL")
-                .AddTextInput(label: "Enter name for playlist or Url to playlist:", customId: "playlist_name", placeholder: "playlist name or url")
-                .Build();
-                await component.RespondWithModalAsync(mb);
-                break;
-            case "PAUSE_UNPAUSE":
-                await component.DeferAsync();
-                await _music_client.TogglePauseAsync();
-
-                break;
-            case "FORWARD":
-                await component.DeferAsync();
-                await _music_client.SkipAsync();
-
-                break;
-            case "REPEAT":
-                await component.DeferAsync();
-                await _music_client.ToggleRepeatAsync();
-
-                break;
-            case "SONGS_MENU":
-                await component.DeferAsync();
-                switch (component.Data.Values.First())
-                {
-                    case "run all":
-                        await _music_client.PlayAsync((component.User as IGuildUser)?.VoiceChannel, playlist_id: current_playlist.Id);
-                        break;
-                    case "delete list":
-                        await _music_client.RemovePlaylistAsync(current_playlist.Id);
-                        // Устанавливаем первый доступный плейлист
-                        Guild? guild = await _guildRepository.GetByDiscordIdWithPlaylistsAsync(_guildDiscordId);
-                        if (guild != null && guild.Playlists.Any())
-                            current_playlist = guild.Playlists.First();
-                        else
-                            current_playlist = _music_client.playback_history;
-                        break;
-                    default:
-                        await _music_client.PlayAsync((component.User as IGuildUser)?.VoiceChannel, song_id: int.Parse(component.Data.Values.First()));
-                        break;
-                }
-                await UpdateMusicViewAsync();
-                break;
-            case "PLAYLIST_MENU":
-                await component.DeferAsync();
-                int playlistId = int.Parse(component.Data.Values.First());
-
-                // Проверяем виртуальные плейлисты
-                if (playlistId == -1)
-                    current_playlist = _music_client.playback_history;
-                else if (playlistId == -2)
-                    current_playlist = _music_client.popular_songs;
-                else
-                {
-                    // Загружаем из БД
-                    Playlist? playlist = await _playlistRepository.GetByIdAsync(playlistId);
-                    if (playlist != null)
-                        current_playlist = playlist;
-                }
-
-                break;
+            await Logger.AddLog($"Music view render failed: {ex.Message}", LogLevel.Error, exception: ex);
         }
+        finally
+        {
+            _renderSemaphore.Release();
+        }
+
         await UpdateMusicViewAsync();
     }
 
-    public async Task RerenderMusicViewAsync(IMessageChannel? channel = null, IMessage? new_msg = null)
-    {
-        await Logger.AddLog($"[RerenderMusicViewAsync] Method called. channel: {channel?.Id}, new_msg: {new_msg?.Id}", LogLevel.Debug);
-
-        await _semaphoreSlim.WaitAsync();
-        await Logger.AddLog("[RerenderMusicViewAsync] Semaphore acquired", LogLevel.Debug);
-
-        try
-        {
-            if (view_message != null)
-            {
-                await Logger.AddLog($"[RerenderMusicViewAsync] Existing view_message found. ID: {view_message.Id}, Channel: {view_message.Channel.Id}", LogLevel.Debug);
-
-                ulong messageId = view_message.Id;
-                IMessageChannel messageChannel = view_message.Channel;
-
-                try
-                {
-                    IMessage? existingMessage = await messageChannel.GetMessageAsync(messageId);
-                    if (existingMessage != null)
-                    {
-                        _deletedMessageIds.Add(messageId);
-                        await view_message.DeleteAsync();
-                        await Logger.AddLog("[RerenderMusicViewAsync] View message deleted successfully", LogLevel.Debug);
-                        
-                        _ = Task.Run(async () =>
-                        {
-                            await Task.Delay(5000);
-                            _deletedMessageIds.Remove(messageId);
-                        });
-                    }
-                    else
-                    {
-                        await Logger.AddLog($"[RerenderMusicViewAsync] View message {messageId} no longer exists, skipping deletion", LogLevel.Debug);
-                    }
-                }
-                catch (Discord.Net.HttpException httpEx) when (httpEx.DiscordCode == DiscordErrorCode.UnknownMessage) // Unknown Message
-                {
-                    await Logger.AddLog($"[RerenderMusicViewAsync] View message {messageId} already deleted (Unknown Message), skipping", LogLevel.Debug);
-                }
-                catch (Exception e)
-                {
-                    await Logger.AddLog($"[RerenderMusicViewAsync] Failed to delete view message: {e.Message}", LogLevel.Warning);
-                }
-                
-                view_message = null;
-                await Logger.AddLog("[RerenderMusicViewAsync] view_message set to null", LogLevel.Debug);
-            }
-            else
-            {
-                await Logger.AddLog("[RerenderMusicViewAsync] No existing view_message found", LogLevel.Debug);
-            }
-
-            await Logger.AddLog($"[RerenderMusicViewAsync] Fetching guild from DB. GuildDiscordId: {_guildDiscordId}", LogLevel.Debug);
-            Guild? guild = await _guildRepository.GetByDiscordIdAsync(_guildDiscordId);
-
-            if (guild?.Anchor != null)
-            {
-                await Logger.AddLog($"[RerenderMusicViewAsync] Guild found with Anchor: {guild.Anchor.Value}", LogLevel.Debug);
-                IMessageChannel current_channel = (await _discordClient.GetChannelAsync(guild.Anchor.Value) as IMessageChannel)!;
-                await Logger.AddLog($"[RerenderMusicViewAsync] Anchor channel retrieved. Channel ID: {current_channel.Id}", LogLevel.Debug);
-                view_message = await current_channel.SendMessageAsync(text: ".", allowedMentions: AllowedMentions.None);
-                await Logger.AddLog($"[RerenderMusicViewAsync] New view message created in anchor channel. Message ID: {view_message.Id}", LogLevel.Debug);
-            }
-            else if (channel != null)
-            {
-                await Logger.AddLog($"[RerenderMusicViewAsync] No anchor found, using provided channel. Channel ID: {channel.Id}", LogLevel.Debug);
-                view_message = await channel.SendMessageAsync(text: ".", allowedMentions: AllowedMentions.None);
-                await Logger.AddLog($"[RerenderMusicViewAsync] New view message created in provided channel. Message ID: {view_message.Id}", LogLevel.Debug);
-            }
-            else
-            {
-                await Logger.AddLog("[RerenderMusicViewAsync] No anchor and no channel provided. Cannot create view message", LogLevel.Warning);
-            }
-        }
-        catch (Exception e)
-        {
-            await Logger.AddLog($"[RerenderMusicViewAsync] Exception occurred: {e.Message}\nStackTrace: {e.StackTrace}", LogLevel.Error);
-        }
-        finally
-        {
-            _semaphoreSlim.Release();
-            await Logger.AddLog("[RerenderMusicViewAsync] Semaphore released", LogLevel.Debug);
-
-            await Logger.AddLog("[RerenderMusicViewAsync] Calling UpdateMusicViewAsync", LogLevel.Debug);
-            await UpdateMusicViewAsync();
-            await Logger.AddLog("[RerenderMusicViewAsync] UpdateMusicViewAsync completed", LogLevel.Debug);
-        }
-    }
     public async Task<bool> UpdateMusicViewAsync()
     {
-        await _semaphoreSlim.WaitAsync();
-        await Logger.AddLog("View update called");
+        if (!await _renderSemaphore.WaitAsync(300))
+            return false;
 
-        Discord.Embed? embed = null;
-        if (_music_client.music_queue.Count > 0 || _music_client.current_song != null)
-        {
-            embed = new EmbedBuilder()
-                .WithDescription(RenderQueue())
-                .WithColor(Color.Orange)
-                .WithAuthor("---LINE--------------------------------------------------",
-                _music_client.is_playing ? "https://media0.giphy.com/media/v1.Y2lkPTc5MGI3NjExMHpuNm8ycXdiaTRkem81ZHN6M2w5MDdibnVrNmZ3MHhxNjIwa3VyNCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9cw/vJHNq9tziq9C3HMrIB/giphy.gif" : "")
-                .Build();
-        }
-
-        MessageComponent component = await CreateComponent();
         try
         {
-            if (view_message == null)
+            await EnsureViewMessageAsync();
+            if (!_viewMessageId.HasValue || !_viewChannelId.HasValue)
                 return false;
-            await (view_message as IUserMessage)!.ModifyAsync(msg => { msg.Components = component; msg.Embed = embed; msg.Content = ""; });
+
+            bool isPlaying = _music_client.playbackStatus == PlaybackStatus.Playing;
+            BotEmbed? embed = null;
+            if (_music_client.music_queue.Count > 0 || _music_client.current_song != null)
+            {
+                embed = new BotEmbed(
+                    RenderQueue(),
+                    isPlaying ? 0x5EC130 : 0x17472D,
+                    "---LINE--------------------------------------------------",
+                    isPlaying ? PLAYING_ICON_URL : null);
+            }
+
+            List<BotComponent> components = await CreateComponentsAsync();
+            BotMessageContent content = new("", embed, components);
+            await _connector.UpdateMessageAsync(_viewChannelId.Value, _viewMessageId.Value, content);
+            return true;
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            await Logger.AddLog("View update failure", LogLevel.Warning);
+            await Logger.AddLog($"View update failure: {ex.Message}", LogLevel.Warning);
+            return false;
         }
         finally
         {
-            _semaphoreSlim.Release();
+            _renderSemaphore.Release();
         }
-        return true;
     }
-    public async Task SetViewMessage(SocketMessage? msg)
+
+    private async Task EnsureViewMessageAsync(ulong? channelId = null)
     {
-        view_message = msg;
-        return;
+        if (_viewMessageId.HasValue && _viewChannelId.HasValue)
+            return;
+
+        if (!channelId.HasValue)
+        {
+            using IServiceScope scope = _serviceScopeFactory.CreateScope();
+            IGuildRepository guildRepository = scope.ServiceProvider.GetRequiredService<IGuildRepository>();
+            Entities.Models.Guild? guild = await guildRepository.GetByDiscordIdAsync(_guildDiscordId);
+            channelId = guild?.Anchor;
+        }
+
+        if (!channelId.HasValue || !await _connector.IsTextChannelAsync(_guildDiscordId, channelId.Value))
+        {
+            await Logger.AddLog("No accessible anchor channel. Cannot create music view", LogLevel.Warning);
+            return;
+        }
+
+        BotMessage message = await _connector.SendMessageAsync(channelId.Value, new BotMessageContent("."));
+        _viewMessageId = message.Id;
+        _viewChannelId = message.ChannelId;
     }
+
+    public Task SetViewMessage(BotMessage? message)
+    {
+        _viewMessageId = message?.Id;
+        _viewChannelId = message?.ChannelId;
+        return Task.CompletedTask;
+    }
+
     public async Task DeleteViewMessageAsync()
     {
-        if (view_message != null)
+        await _renderSemaphore.WaitAsync();
+        try
         {
-            ulong messageId = view_message.Id;
-            _deletedMessageIds.Add(messageId);
-            await view_message.DeleteAsync();
-            view_message = null;
-
-            _ = Task.Run(async () =>
-            {
-                await Task.Delay(5000);
-                _deletedMessageIds.Remove(messageId);
-            });
+            await DeleteViewMessageCoreAsync();
+        }
+        finally
+        {
+            _renderSemaphore.Release();
         }
     }
 
-
-    /// <summary>
-    /// Обрабатывает событие удаления сообщения. Решает, нужно ли ререндерить вьюшку.
-    /// </summary>
-    public async Task HandleMessageDeletedAsync(Cacheable<IMessage, ulong> cacheableMessage, Cacheable<IMessageChannel, ulong> cacheableChannel, ulong botUserId)
+    private async Task DeleteViewMessageCoreAsync()
     {
-        var channel = await cacheableChannel.GetOrDownloadAsync() as IGuildChannel;
-        if (channel?.GuildId == null)
+        if (!_viewMessageId.HasValue || !_viewChannelId.HasValue)
             return;
 
-        // Проверяем, является ли канал anchor каналом для нашей гильдии
-        Guild? guild = await _guildRepository.GetByDiscordIdAsync(_guildDiscordId);
-        if (guild?.Anchor != channel.Id)
-            return;
+        ulong messageId = _viewMessageId.Value;
+        ulong channelId = _viewChannelId.Value;
+        _deletedMessageIds.Add(messageId);
 
-        // Получаем удаленное сообщение, если оно доступно
-        IMessage? deletedMessage = null;
         try
         {
-            deletedMessage = await cacheableMessage.GetOrDownloadAsync();
+            await _connector.DeleteMessageAsync(channelId, messageId);
         }
         catch
         {
-            // Сообщение уже удалено и недоступно - это нормально
         }
 
-        // Проверяем, удаляем ли мы это сообщение сами - если да, игнорируем
-        if (_deletedMessageIds.Contains(cacheableMessage.Id))
-        {
-            await Logger.AddLog($"[MusicViewService] Ignoring deletion of message we're deleting ourselves. Message ID: {cacheableMessage.Id}", LogLevel.Debug);
-            return;
-        }
+        _viewMessageId = null;
+        _viewChannelId = null;
 
-        // Проверяем, является ли удаленное сообщение нашей вьюшкой (от бота с точкой)
-        bool isOurViewMessage = false;
-        
-        if (deletedMessage != null)
+        _ = Task.Run(async () =>
         {
-            // Если сообщение доступно - проверяем автора и содержимое
-            isOurViewMessage = deletedMessage.Author.Id == botUserId && deletedMessage.Content == ".";
-            await Logger.AddLog($"[MusicViewService] Deleted message available. Author: {deletedMessage.Author.Id}, Content: '{deletedMessage.Content}', Is our view: {isOurViewMessage}", LogLevel.Debug);
-        }
-        else
-        {
-            // Если сообщение недоступно, проверяем, является ли оно текущей вьюшкой
-            // Это важно для случая, когда администратор удалил вьюшку вручную
-            isOurViewMessage = view_message?.Id == cacheableMessage.Id;
-            await Logger.AddLog($"[MusicViewService] Deleted message unavailable. Checking if it's current view. Deleted ID: {cacheableMessage.Id}, Current view ID: {view_message?.Id}, Is our view: {isOurViewMessage}", LogLevel.Debug);
-        }
-
-        if (isOurViewMessage)
-        {
-            // Удалена наша вьюшка (либо мы сами, либо администратор) - ререндерим
-            await Logger.AddLog($"[MusicViewService] Our view message was deleted. Message ID: {cacheableMessage.Id}, Current view message ID: {view_message?.Id}. Re-rendering...", LogLevel.Debug);
-            
-            // Очищаем ссылку на удаленное сообщение
-            if (view_message?.Id == cacheableMessage.Id)
-                await SetViewMessage(null);
-            
-            await RerenderMusicViewAsync();
-        }
-        else
-            // Удалено не наше сообщение - игнорируем
-            await Logger.AddLog($"[MusicViewService] Ignoring deletion of non-view message in anchor channel. Deleted message ID: {cacheableMessage.Id}", LogLevel.Debug);
+            await Task.Delay(5000);
+            _deletedMessageIds.Remove(messageId);
+        });
     }
 
-    /// <summary>
-    /// Обрабатывает событие получения сообщения. Решает, нужно ли ререндерить вьюшку.
-    /// </summary>
-    public async Task HandleMessageReceivedAsync(SocketMessage message, ulong botUserId, string commandTag)
+    public async Task HandleMessageDeletedAsync(BotMessageDeleted message)
     {
-        if (message == null)
+        if (message.GuildId != _guildDiscordId || _deletedMessageIds.Contains(message.MessageId))
             return;
 
-        var guildChannel = message.Channel as IGuildChannel;
-        if (guildChannel?.GuildId == null)
+        if (_viewMessageId != message.MessageId)
             return;
 
-        // Проверяем, является ли канал anchor каналом для нашей гильдии
-        Guild? guild = await _guildRepository.GetByDiscordIdAsync(_guildDiscordId);
-        if (guild?.Anchor != guildChannel.Id)
+        _viewMessageId = null;
+        _viewChannelId = null;
+        await RerenderMusicViewAsync();
+    }
+
+    public async Task HandleMessageReceivedAsync(BotMessage message)
+    {
+        if (message.GuildId != _guildDiscordId)
             return;
 
-        // Игнорируем команды
-        if (message.Content.StartsWith(commandTag))
+        using IServiceScope scope = _serviceScopeFactory.CreateScope();
+        IGuildRepository guildRepository = scope.ServiceProvider.GetRequiredService<IGuildRepository>();
+        Entities.Models.Guild? guild = await guildRepository.GetByDiscordIdAsync(_guildDiscordId);
+
+        if (guild?.Anchor != message.ChannelId)
             return;
 
-        // Если это сообщение от бота с точкой - это наше сообщение вьюшки, просто устанавливаем его
-        if (message.Author.Id == botUserId && message.Content == ".")
+        if (message.AuthorId == _connector.CurrentUserId)
         {
-            await SetViewMessage(message);
+            if (message.Content == ".")
+                await SetViewMessage(message);
             return;
         }
 
-        // Игнорируем все остальные сообщения от бота
-        if (message.Author.Id == botUserId)
-            return;
-
-        // Если сообщение от пользователя в anchor канале - ререндерим
-        await Logger.AddLog($"[MusicViewService] User message received in anchor channel. Re-rendering...", LogLevel.Debug);
         await RerenderMusicViewAsync();
     }
 
     protected string RenderQueue()
     {
-        if (!_music_client.music_queue.IsEmpty || _music_client.current_song != null || (_music_client.music_queue.Count == 1 && _music_client.on_repeat))
-        {
-            StringBuilder result = new();
-            int offset = _music_client.on_repeat ? 1 : 0;
-            List<KeyValuePair<IVoiceChannel, Song>> music_list = _music_client.music_queue.ToList();
+        if (_music_client.music_queue.Count == 0 && _music_client.current_song == null)
+            return "";
 
-            for (int q = music_list.Count - 1; q >= offset; q--)
-            {
-                string temp = music_list[q].Value.Name;
-                result.Append($"{(q + 2 - offset).ToString()} {temp}\n");
-            }
+        StringBuilder result = new();
+        int offset = _music_client.on_repeat ? 1 : 0;
+        List<(BotVoiceChannel, Song)> musicList = _music_client.music_queue.ToList();
 
-            if ((_music_client.is_playing || _music_client.is_paused) && _music_client.current_song != null)
-            {
-                result.Append($"**1. {_music_client.current_song.Value.Value.Name}**");
-            }
+        for (int q = musicList.Count - 1; q >= offset; q--)
+            result.Append($"{q + 2 - offset} {musicList[q].Item2.Name}\n");
 
-            return result.ToString();
-        }
-        return "";
+        if (_music_client.playbackStatus is PlaybackStatus.Playing or PlaybackStatus.Paused && _music_client.current_song != null)
+            result.Append($"**1. {_music_client.current_song.Value.Item2.Name}**");
+
+        return result.ToString();
     }
+
+    protected string GetLikeButtonLabel()
+    {
+        if (GetLikeButtonDisabled())
+            return "X";
+
+        Song song = _music_client.current_song!.Value.Item2;
+        return current_playlist.Songs.Select(s => s.Id).Contains(song.Id) ? "🤍" : "💚";
+    }
+
+    protected BotButtonStyle GetLikeButtonStyle()
+    {
+        if (GetLikeButtonDisabled())
+            return BotButtonStyle.Secondary;
+
+        Song song = _music_client.current_song!.Value.Item2;
+        return current_playlist.Songs.Select(s => s.Id).Contains(song.Id)
+            ? BotButtonStyle.Success
+            : BotButtonStyle.Secondary;
+    }
+
+    protected bool GetLikeButtonDisabled() =>
+        _music_client.current_song == null || current_playlist.Id is -1 or -2;
+
+    protected string GetPauseUnpauseLabel() =>
+        _music_client.playbackStatus == PlaybackStatus.Playing ? "||" : "▶";
+
+    protected BotButtonStyle GetPauseUnpauseStyle() =>
+        _music_client.playbackStatus == PlaybackStatus.Paused ? BotButtonStyle.Danger : BotButtonStyle.Primary;
+
+    protected BotButtonStyle GetForwardButtonStyle() =>
+        _music_client.music_queue.Count > 0 ? BotButtonStyle.Primary : BotButtonStyle.Secondary;
+
+    protected BotButtonStyle GetRepeatButtonStyle() =>
+        _music_client.on_repeat ? BotButtonStyle.Success : BotButtonStyle.Secondary;
+
+    public void DisposeAutoUpdateTimer() => _autoUpdateTimer.Dispose();
 }

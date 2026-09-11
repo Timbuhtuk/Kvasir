@@ -3,7 +3,6 @@ using System;
 using Infrastructure;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
-using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -16,33 +15,27 @@ namespace Infrastructure.Migrations
         protected override void BuildModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
-            modelBuilder
-                .HasAnnotation("ProductVersion", "9.0.11")
-                .HasAnnotation("Relational:MaxIdentifierLength", 128);
-
-            SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
+            modelBuilder.HasAnnotation("ProductVersion", "9.0.11");
 
             modelBuilder.Entity("Entities.Models.Guild", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("int")
+                        .HasColumnType("INTEGER")
                         .HasColumnName("id");
 
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
-
-                    b.Property<decimal?>("Anchor")
+                    b.Property<ulong?>("Anchor")
                         .HasColumnType("decimal(20,0)")
                         .HasColumnName("Anchor");
 
-                    b.Property<decimal>("DiscordId")
+                    b.Property<ulong>("DiscordId")
                         .HasColumnType("decimal(20,0)")
                         .HasColumnName("Discord_id");
 
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("Name");
 
                     b.HasKey("Id");
@@ -54,12 +47,10 @@ namespace Infrastructure.Migrations
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("int")
+                        .HasColumnType("INTEGER")
                         .HasColumnName("id");
 
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
-
-                    b.Property<decimal>("AuthorId")
+                    b.Property<ulong>("AuthorId")
                         .HasColumnType("decimal(20,0)")
                         .HasColumnName("Author_id");
 
@@ -68,13 +59,13 @@ namespace Infrastructure.Migrations
                         .HasColumnName("Creation_date");
 
                     b.Property<bool>("IsPublic")
-                        .HasColumnType("bit")
+                        .HasColumnType("INTEGER")
                         .HasColumnName("Is_public");
 
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("Name");
 
                     b.HasKey("Id");
@@ -86,16 +77,14 @@ namespace Infrastructure.Migrations
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("int")
+                        .HasColumnType("INTEGER")
                         .HasColumnName("id");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
                     b.Property<string>("AuthorName")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
                         .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)")
+                        .HasColumnType("TEXT")
                         .HasDefaultValue("NN")
                         .HasColumnName("Author_name");
 
@@ -105,22 +94,25 @@ namespace Infrastructure.Migrations
 
                     b.Property<string>("FilePath")
                         .HasMaxLength(320)
-                        .HasColumnType("nvarchar(320)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("File_path");
+
+                    b.Property<bool>("IsDownloaded")
+                        .HasColumnType("INTEGER");
 
                     b.Property<string>("Link")
                         .HasMaxLength(256)
-                        .HasColumnType("nvarchar(256)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("Link");
 
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("Name");
 
                     b.Property<int>("Views")
-                        .HasColumnType("int")
+                        .HasColumnType("INTEGER")
                         .HasColumnName("Views");
 
                     b.HasKey("Id");
@@ -131,10 +123,10 @@ namespace Infrastructure.Migrations
             modelBuilder.Entity("GuildPlaylist", b =>
                 {
                     b.Property<int>("GuildsId")
-                        .HasColumnType("int");
+                        .HasColumnType("INTEGER");
 
                     b.Property<int>("PlaylistsId")
-                        .HasColumnType("int");
+                        .HasColumnType("INTEGER");
 
                     b.HasKey("GuildsId", "PlaylistsId");
 
@@ -146,10 +138,10 @@ namespace Infrastructure.Migrations
             modelBuilder.Entity("PlaylistSong", b =>
                 {
                     b.Property<int>("PlaylistsId")
-                        .HasColumnType("int");
+                        .HasColumnType("INTEGER");
 
                     b.Property<int>("SongsId")
-                        .HasColumnType("int");
+                        .HasColumnType("INTEGER");
 
                     b.HasKey("PlaylistsId", "SongsId");
 

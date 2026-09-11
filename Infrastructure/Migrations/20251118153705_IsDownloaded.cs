@@ -5,23 +5,24 @@
 namespace Infrastructure.Migrations
 {
     /// <inheritdoc />
-    public partial class AddAudioDataToSong : Migration
+    public partial class IsDownloaded : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.AddColumn<byte[]>(
-                name: "Audio_data",
+            migrationBuilder.AddColumn<bool>(
+                name: "IsDownloaded",
                 table: "Song",
-                type: "varbinary(max)",
-                nullable: true);
+                type: "INTEGER",
+                nullable: false,
+                defaultValue: false);
         }
 
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.DropColumn(
-                name: "Audio_data",
+                name: "IsDownloaded",
                 table: "Song");
         }
     }

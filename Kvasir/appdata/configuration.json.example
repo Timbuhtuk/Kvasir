@@ -1,7 +1,8 @@
 ﻿{
-  "tokens": [ "yout_discord_bot_token" ],
-  "command_tag": "your_tag",
+  "tokens": [],
+  "owner_id": "",
   "music_client": {
+    "music_folder": "music",
     "searching_song": [ "searching...", "one moment searching", "trying to find" ],
     "user_not_in_vc": [ "Connect to a voice channel!", "you must be connected to voice channel" ],
     "cant_connect_to_vc": [ "Could not connect to the voice channel" ],
@@ -30,10 +31,8 @@
     "dbLogLevel": "None"
   },
   "help_client": {
-    "help_message": "```I saw that you need help, ok lets have a look at commands you can use:\n\n````````````For music````````````\n!play / !p - play the selected song\n!play Xx/ !p Xx - play the selected song X times\n!skip / !s - skip the current song\n!clear / !c - clear queue\n!leave / !l -  disconnect me from channel\nand below you cant find link which can add me to your other servers ```",
+    "help_message": "Music commands: /play, /pause, /resume, /skip, /clear, /leave and /anchor.",
     "ready": "ready"
   },
-  "use_database": true,
-  "connection_string": "your_connection_string",
-  "music_folder": "music"
+  "connection_string": "Data Source=appdata\\DiscordMusicDB.db"
 }
