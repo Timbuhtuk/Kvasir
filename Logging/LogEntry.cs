@@ -1,10 +1,11 @@
 using Entities.Enums;
+using Microsoft.Extensions.Logging;
 using System.Text.Json.Serialization;
 
 namespace Logging;
 
 /// <summary>
-/// Структурированная запись лога для сохранения и обработки
+/// Structured log entry for storage and processing
 /// </summary>
 public class LogEntry
 {
@@ -12,7 +13,7 @@ public class LogEntry
     public DateTime Timestamp { get; set; }
 
     [JsonPropertyName("level")]
-    public LogLevel Level { get; set; }
+    public Microsoft.Extensions.Logging.LogLevel Level { get; set; }
 
     [JsonPropertyName("category")]
     public LogCategory Category { get; set; }
@@ -44,4 +45,3 @@ public class LogEntry
     [JsonPropertyName("depth")]
     public int Depth { get; set; }
 }
-

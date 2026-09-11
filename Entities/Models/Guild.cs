@@ -4,13 +4,13 @@ using System.ComponentModel.DataAnnotations.Schema;
 namespace Entities.Models;
 
 /// <summary>
-/// Представляет гильдию Discord
+/// Represents Discord guild
 /// </summary>
 [Table("Guild")]
 public partial class Guild : IEntity
 {
     /// <summary>
-    /// Первичный ключ
+    /// Primary key
     /// </summary>
     [Key]
     [Column("id")]
@@ -18,7 +18,7 @@ public partial class Guild : IEntity
     public int Id { get; set; }
 
     /// <summary>
-    /// Название гильдии
+    /// Guild name
     /// </summary>
     [Required]
     [MaxLength(128)]
@@ -26,20 +26,20 @@ public partial class Guild : IEntity
     public string Name { get; set; } = null!;
 
     /// <summary>
-    /// Discord ID гильдии
+    /// Discord guild ID
     /// </summary>
     [Required]
     [Column("Discord_id", TypeName = "decimal(20,0)")]
     public ulong DiscordId { get; set; }
 
     /// <summary>
-    /// ID якорного сообщения (опционально)
+    /// Anchor message ID (optional)
     /// </summary>
     [Column("Anchor", TypeName = "decimal(20,0)")]
     public ulong? Anchor { get; set; }
 
     /// <summary>
-    /// Навигационное свойство: плейлисты гильдии
+    /// Navigation property: guild playlists
     /// </summary>
     [InverseProperty(nameof(Playlist.Guilds))]
     public virtual ICollection<Playlist> Playlists { get; set; } = new List<Playlist>();

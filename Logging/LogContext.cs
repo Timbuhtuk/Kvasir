@@ -1,7 +1,7 @@
 namespace Logging;
 
 /// <summary>
-/// Контекст логирования для текущего async потока
+/// Logging context for current async thread
 /// </summary>
 public static class LogContext
 {
@@ -9,39 +9,34 @@ public static class LogContext
     private static readonly AsyncLocal<string?> _guildName = new();
 
     /// <summary>
-    /// ID текущей гильдии в контексте выполнения
+    /// Current guild ID in execution context
     /// </summary>
-    public static ulong? GuildId
-    {
+    public static ulong? GuildId {
         get => _guildId.Value;
         set => _guildId.Value = value;
     }
 
     /// <summary>
-    /// Имя текущей гильдии в контексте выполнения
+    /// Current guild name in execution context
     /// </summary>
-    public static string? GuildName
-    {
+    public static string? GuildName {
         get => _guildName.Value;
         set => _guildName.Value = value;
     }
 
     /// <summary>
-    /// Установить контекст гильдии
+    /// Set guild context
     /// </summary>
-    public static void SetGuild(ulong? guildId, string? guildName = null)
-    {
+    public static void SetGuild(ulong? guildId, string? guildName = null) {
         GuildId = guildId;
         GuildName = guildName;
     }
 
     /// <summary>
-    /// Очистить контекст гильдии
+    /// Clear guild context
     /// </summary>
-    public static void Clear()
-    {
+    public static void Clear() {
         GuildId = null;
         GuildName = null;
     }
 }
-

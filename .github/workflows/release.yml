@@ -1,0 +1,143 @@
+name: Release
+
+permissions:
+  contents: write
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g., v1.0.0)'
+        required: true
+        type: string
+
+jobs:
+  build-and-publish:
+    name: Build and Publish
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '10.0.x'
+
+    - name: Cache NuGet packages
+      uses: actions/cache@v4
+      with:
+        path: ~/.nuget/packages
+        key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+        restore-keys: |
+          ${{ runner.os }}-nuget-
+
+    - name: Restore dependencies
+      run: dotnet restore Kvasir.sln
+
+    - name: Download external dependencies
+      shell: powershell
+      env:
+        FFMPEG_URL: ${{ secrets.FFMPEG_URL }}
+        YTDLP_URL: ${{ secrets.YTDLP_URL }}
+      run: |
+        # Создаем директорию appdata если её нет
+        New-Item -ItemType Directory -Force -Path "Kvasir/appdata" | Out-Null
+
+        # Скачиваем yt-dlp (если URL не указан, используем последнюю версию с GitHub)
+        if ($env:YTDLP_URL) {
+          Write-Host "Downloading yt-dlp from custom URL..."
+          Invoke-WebRequest -Uri $env:YTDLP_URL -OutFile "Kvasir/appdata/yt-dlp.exe"
+        } else {
+          Write-Host "Downloading latest yt-dlp from GitHub..."
+          $ytdlpRelease = Invoke-RestMethod -Uri "https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest"
+          $ytdlpUrl = ($ytdlpRelease.assets | Where-Object { $_.name -like "*yt-dlp.exe" }).browser_download_url
+          if ($ytdlpUrl) {
+            Invoke-WebRequest -Uri $ytdlpUrl -OutFile "Kvasir/appdata/yt-dlp.exe"
+          } else {
+            Write-Warning "Could not find yt-dlp.exe in latest release"
+          }
+        }
+
+        # Скачиваем FFmpeg (если URL указан)
+        if ($env:FFMPEG_URL) {
+          Write-Host "Downloading FFmpeg from custom URL..."
+          $ffmpegZip = "ffmpeg.zip"
+          Invoke-WebRequest -Uri $env:FFMPEG_URL -OutFile $ffmpegZip
+          Expand-Archive -Path $ffmpegZip -DestinationPath "ffmpeg_temp" -Force
+          # Ищем exe файлы в распакованной папке
+          $ffmpegExe = Get-ChildItem -Path "ffmpeg_temp" -Recurse -Filter "ffmpeg.exe" | Select-Object -First 1
+          $ffplayExe = Get-ChildItem -Path "ffmpeg_temp" -Recurse -Filter "ffplay.exe" | Select-Object -First 1
+          $ffprobeExe = Get-ChildItem -Path "ffmpeg_temp" -Recurse -Filter "ffprobe.exe" | Select-Object -First 1
+          if ($ffmpegExe) { Copy-Item $ffmpegExe.FullName -Destination "Kvasir/appdata/ffmpeg.exe" }
+          if ($ffplayExe) { Copy-Item $ffplayExe.FullName -Destination "Kvasir/appdata/ffplay.exe" }
+          if ($ffprobeExe) { Copy-Item $ffprobeExe.FullName -Destination "Kvasir/appdata/ffprobe.exe" }
+          Remove-Item -Recurse -Force "ffmpeg_temp"
+          Remove-Item $ffmpegZip
+        } else {
+          Write-Warning "FFMPEG_URL not set in secrets. Skipping FFmpeg download."
+        }
+
+        # Создаем configuration.json из примера если его нет
+        if (-not (Test-Path "Kvasir/appdata/configuration.json")) {
+          if (Test-Path "Kvasir/appdata/configuration.json.example") {
+            Copy-Item "Kvasir/appdata/configuration.json.example" -Destination "Kvasir/appdata/configuration.json"
+            Write-Host "Created configuration.json from example"
+          } else {
+            Write-Warning "configuration.json.example not found"
+          }
+        }
+
+    - name: Build solution
+      run: dotnet build Kvasir.sln --configuration Release --no-restore
+
+    - name: Check architecture boundary
+      shell: powershell
+      run: ./scripts/check-architecture.ps1
+
+    - name: Publish application
+      run: dotnet publish Kvasir/Kvasir.csproj --configuration Release --output ./publish/win-x64 --runtime win-x64 --self-contained false
+
+    - name: Verify release contains no secrets
+      shell: powershell
+      run: |
+        $configuration = Get-Content "publish/win-x64/appdata/configuration.json" -Raw | ConvertFrom-Json
+        if ($configuration.tokens.Count -gt 0) {
+          throw "Release configuration contains a Discord token"
+        }
+        if ($configuration.spotify_settings.SPOTIFY_CLIENT_ID -or $configuration.spotify_settings.SPOTIFY_CLIENT_SECRET) {
+          throw "Release configuration contains Spotify credentials"
+        }
+
+    - name: Create release archive
+      shell: powershell
+      env:
+        VERSION_TAG: ${{ github.ref_name }}
+        MANUAL_VERSION: ${{ github.event.inputs.version }}
+      run: |
+        $version = if ($env:VERSION_TAG -like 'v*') { $env:VERSION_TAG } else { $env:MANUAL_VERSION }
+        Compress-Archive -Path ./publish/win-x64/* -DestinationPath ./Kvasir-$version-win-x64.zip -Force
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: Kvasir-release
+        path: ./Kvasir-*.zip
+        retention-days: 30
+
+    - name: Create GitHub Release
+      shell: powershell
+      env:
+        GH_TOKEN: ${{ github.token }}
+        VERSION_TAG: ${{ github.ref_name }}
+        MANUAL_VERSION: ${{ github.event.inputs.version }}
+      run: |
+        $version = if ($env:VERSION_TAG -like 'v*') { $env:VERSION_TAG } else { $env:MANUAL_VERSION }
+        if ($version -notmatch '^v\d+\.\d+\.\d+$') {
+          throw "Version must have the vMAJOR.MINOR.PATCH format"
+        }
+        gh release create $version "./Kvasir-$version-win-x64.zip" --target "${{ github.sha }}" --title "Kvasir $version" --notes-file RELEASE_NOTES.md

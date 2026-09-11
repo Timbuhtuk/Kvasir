@@ -4,13 +4,13 @@ using System.ComponentModel.DataAnnotations.Schema;
 namespace Entities.Models;
 
 /// <summary>
-/// Представляет песню/трек
+/// Represents song/track
 /// </summary>
 [Table("Song")]
 public partial class Song : IEntity
 {
     /// <summary>
-    /// Первичный ключ
+    /// Primary key
     /// </summary>
     [Key]
     [Column("id")]
@@ -18,7 +18,7 @@ public partial class Song : IEntity
     public int Id { get; set; }
 
     /// <summary>
-    /// Название песни
+    /// Song name
     /// </summary>
     [Required]
     [MaxLength(128)]
@@ -26,7 +26,7 @@ public partial class Song : IEntity
     public string Name { get; set; } = null!;
 
     /// <summary>
-    /// Имя автора/исполнителя
+    /// Author/performer name
     /// </summary>
     [Required]
     [MaxLength(128)]
@@ -34,34 +34,36 @@ public partial class Song : IEntity
     public string AuthorName { get; set; } = "NN";
 
     /// <summary>
-    /// Длительность в минутах (опционально)
+    /// Duration in minutes (optional)
     /// </summary>
     [Column("Duration", TypeName = "float")]
     public double? Duration { get; set; }
 
     /// <summary>
-    /// Ссылка на источник (YouTube, и т.д.)
+    /// Source link (YouTube, etc.)
     /// </summary>
     [MaxLength(256)]
     [Column("Link")]
     public string? Link { get; set; }
 
     /// <summary>
-    /// Путь к файлу на диске
+    /// File path on disk
     /// </summary>
     [MaxLength(320)]
     [Column("File_path")]
     public string? FilePath { get; set; }
 
     /// <summary>
-    /// Количество просмотров
+    /// View count
     /// </summary>
     [Required]
     [Column("Views")]
     public int Views { get; set; } = 0;
 
+    public bool IsDownloaded { get; set; } = false;
+
     /// <summary>
-    /// Навигационное свойство: плейлисты, содержащие эту песню
+    /// Navigation property: playlists containing this song
     /// </summary>
     [InverseProperty(nameof(Playlist.Songs))]
     public virtual ICollection<Playlist> Playlists { get; set; } = new List<Playlist>();

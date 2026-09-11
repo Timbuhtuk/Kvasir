@@ -5,22 +5,18 @@ namespace Infrastructure;
 
 public partial class DiscordMusicDBContext : DbContext
 {
-    public DiscordMusicDBContext()
-    {
+    public DiscordMusicDBContext() {
     }
 
     public DiscordMusicDBContext(DbContextOptions<DiscordMusicDBContext> options)
-        : base(options)
-    {
+        : base(options) {
     }
 
     public virtual DbSet<Guild> Guilds { get; set; }
     public virtual DbSet<Playlist> Playlists { get; set; }
     public virtual DbSet<Song> Songs { get; set; }
 
-    protected override void OnModelCreating(ModelBuilder modelBuilder)
-    {
-        // Настраиваем связи многие-ко-многим через skip navigation
+    protected override void OnModelCreating(ModelBuilder modelBuilder) {
         modelBuilder.Entity<Guild>()
             .HasMany(g => g.Playlists)
             .WithMany(p => p.Guilds)
@@ -31,9 +27,7 @@ public partial class DiscordMusicDBContext : DbContext
             .WithMany(p => p.Songs)
             .UsingEntity(j => j.ToTable("SongPlaylist"));
 
-        // Настройка значений по умолчанию
-        modelBuilder.Entity<Song>(entity =>
-        {
+        modelBuilder.Entity<Song>(entity => {
             entity.Property(e => e.AuthorName)
                 .HasDefaultValue("NN");
         });

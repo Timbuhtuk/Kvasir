@@ -1,0 +1,38 @@
+﻿{
+  "tokens": [],
+  "owner_id": "",
+  "music_client": {
+    "music_folder": "music",
+    "searching_song": [ "searching...", "one moment searching", "trying to find" ],
+    "user_not_in_vc": [ "Connect to a voice channel!", "you must be connected to voice channel" ],
+    "cant_connect_to_vc": [ "Could not connect to the voice channel" ],
+    "cant_download_song": [ "Could not download the song." ],
+    "song_added_to_queue": [ " added to queue", " now in queue" ],
+    "paused": [ "paused" ],
+    "resumed": [ "resumed" ],
+    "queue_empty": [ "No music in the queue." ],
+    "queue_cleared": [ "Queue cleared!" ],
+    "anchor_dropped": [ "!!!ANCHOR DROPPED!!!" ],
+    "anchor_pickedup": [ "!!!ANCHOR PICKED UP!!!" ]
+  },
+  "spotify_settings": {
+    "SPOTIFY_ENABLED": false,
+    "SPOTIFY_CLIENT_ID": "",
+    "SPOTIFY_CLIENT_SECRET": ""
+  },
+  "utility_client": {
+    "flip": [ "You flipped coin and get " ],
+    "rnd": [ "You pulled level and get  " ]
+  },
+  "logging": {
+    "level": "Information",
+    "enableFileLogging": true,
+    "enableConsoleLogging": true,
+    "dbLogLevel": "None"
+  },
+  "help_client": {
+    "help_message": "Music commands: /play, /pause, /resume, /skip, /clear, /leave and /anchor.",
+    "ready": "ready"
+  },
+  "connection_string": "Data Source=appdata\\DiscordMusicDB.db"
+}

@@ -1,63 +1,62 @@
 namespace Entities.Enums;
 
 /// <summary>
-/// Категории логов для разделения по типам операций
+/// Log categories for separating by operation types
 /// </summary>
 public enum LogCategory
 {
     /// <summary>
-    /// Общие логи
+    /// General logs
     /// </summary>
     General,
     
     /// <summary>
-    /// Логи базы данных
+    /// Database logs
     /// </summary>
     Database,
     
     /// <summary>
-    /// Логи сервисов
+    /// Service logs
     /// </summary>
     Service,
     
     /// <summary>
-    /// Логи музыкального клиента
+    /// Music client logs
     /// </summary>
     Music,
     
     /// <summary>
-    /// Логи Discord API
+    /// Discord API logs
     /// </summary>
     Discord,
     
     /// <summary>
-    /// Логи обработчиков команд
+    /// Command handler logs
     /// </summary>
     Command,
     
     /// <summary>
-    /// Логи обработчиков компонентов
+    /// Component handler logs
     /// </summary>
     Component,
     
     /// <summary>
-    /// Логи обработчиков событий
+    /// Event handler logs
     /// </summary>
     Event,
     
     /// <summary>
-    /// Логи загрузки аудио
+    /// Audio download logs
     /// </summary>
     AudioDownload,
     
     /// <summary>
-    /// Логи поиска видео
+    /// Video finder logs
     /// </summary>
     VideoFinder,
     
     /// <summary>
-    /// Логи FFmpeg
+    /// FFmpeg logs
     /// </summary>
     FFmpeg
 }
-
