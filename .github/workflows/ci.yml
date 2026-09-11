@@ -36,7 +36,4 @@ jobs:
       run: ./scripts/check-architecture.ps1
 
     - name: Build solution
-      run: dotnet build Kvasir.sln --configuration Release --no-restore
-
-    - name: Check for build warnings
-      run: dotnet build Kvasir.sln --configuration Release --no-restore --verbosity normal | Out-File -FilePath build.log; if (Select-String -Path build.log -Pattern "warning" -Quiet) { Write-Host "Build warnings found:"; Select-String -Path build.log -Pattern "warning"; exit 1 }
+      run: dotnet build Kvasir.sln --configuration Release --no-restore --warnaserror
