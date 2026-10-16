@@ -2,104 +2,104 @@
 
 # 🎵 Kvasir
 
-**Музыкальный Discord-бот на .NET 10 с изолированными внешними коннекторами**
+**A .NET 10 Discord music bot with isolated external connectors**
 
 [![CI](https://github.com/Timbuhtuk/Kvasir/actions/workflows/ci.yml/badge.svg?branch=ToatalRebuild)](https://github.com/Timbuhtuk/Kvasir/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/Timbuhtuk/Kvasir?display_name=tag&sort=semver)](https://github.com/Timbuhtuk/Kvasir/releases)
 [![.NET](https://img.shields.io/badge/.NET-10.0-512BD4)](https://dotnet.microsoft.com/)
-[![Platform](https://img.shields.io/badge/platform-Windows%20x64-0078D4)](#требования)
+[![Platform](https://img.shields.io/badge/platform-Windows%20x64-0078D4)](#requirements)
 
 </div>
 
-Kvasir воспроизводит музыку в голосовых каналах Discord, управляет очередью и плейлистами и показывает интерактивную музыкальную панель. Ядро не зависит от конкретной Discord-библиотеки: при очередном изменении API переписывается коннектор, а не логика бота.
+Kvasir plays music in Discord voice channels, manages queues and playlists, and provides an interactive music panel. Its core is independent of any specific Discord library: when an API changes, the connector can be replaced without rewriting the bot logic.
 
-## Возможности
+## Features
 
-- поиск по названию и прямой ссылке;
-- очередь, пауза, продолжение, повтор, пропуск и очистка;
-- плейлисты, история воспроизведения и популярные треки;
-- интерактивная панель с кнопками и выпадающими списками;
-- YouTube через `YoutubeExplode` с резервной загрузкой через `yt-dlp`;
-- необязательное уточнение метаданных через Spotify;
-- локальное хранение в SQLite;
-- голосовое соединение Discord с DAVE/E2EE;
-- журналирование по серверам и категориям.
+- Search by title or direct link.
+- Queue, pause, resume, repeat, skip, and clear controls.
+- Playlists, playback history, and popular tracks.
+- An interactive panel with buttons and dropdowns.
+- YouTube through `YoutubeExplode`, with `yt-dlp` as a download fallback.
+- Optional Spotify metadata refinement.
+- Local SQLite storage.
+- Discord voice connections with DAVE/E2EE.
+- Logging by server and category.
 
-## Архитектура
+## Architecture
 
-```text
+~~~text
 Entities ← Application ← Infrastructure
                ↑               ↑
                │               │
      Connectors/Media     Kvasir/Connectors
    Spotify / YouTube          NetCord
-```
+~~~
 
-`Application` работает только с интерфейсами `IBotConnector`, `IBotVoiceConnection`, `IVideoFinderService` и `IAudioDownloaderService`. NetCord находится на внешней границе проекта. Подробности и порядок замены библиотеки описаны в [ARCHITECTURE.md](ARCHITECTURE.md).
+`Application` depends only on the `IBotConnector`, `IBotVoiceConnection`, `IVideoFinderService`, and `IAudioDownloaderService` interfaces. NetCord sits at the project's outer boundary. See [ARCHITECTURE.md](ARCHITECTURE.md) for details and the library replacement procedure.
 
-Граница автоматически проверяется командой:
+Check the boundary automatically with:
 
-```powershell
+~~~powershell
 .\scripts\check-architecture.ps1
-```
+~~~
 
-## Требования
+## Requirements
 
-- Windows x64;
-- [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) для сборки или .NET 10 Runtime для готового релиза;
-- Discord-приложение с ботом и разрешениями `Guilds`, `Guild Messages`, `Message Content`, `Guild Voice States`;
-- `ffmpeg.exe`, `ffplay.exe` и `ffprobe.exe` в `Kvasir/appdata`;
-- `yt-dlp.exe` в `Kvasir/appdata`.
+- Windows x64.
+- [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) to build from source, or .NET 10 Runtime to run a release.
+- A Discord bot application with `Guilds`, `Guild Messages`, `Message Content`, and `Guild Voice States` permissions.
+- `ffmpeg.exe`, `ffplay.exe`, and `ffprobe.exe` in `Kvasir/appdata`.
+- `yt-dlp.exe` in `Kvasir/appdata`.
 
-Нативные библиотеки DAVE и Opus уже входят в репозиторий и готовый релиз.
+Native DAVE and Opus libraries are included in the repository and release package.
 
-## Быстрый запуск из исходников
+## Quick start from source
 
-```powershell
+~~~powershell
 git clone https://github.com/Timbuhtuk/Kvasir.git
 cd Kvasir
 Copy-Item Kvasir/appdata/configuration.json.example Kvasir/appdata/configuration.json
 .\scripts\download-dependencies.ps1
-```
+~~~
 
-Скрипт автоматически скачивает свежий `yt-dlp`. FFmpeg можно положить в `Kvasir/appdata` вручную либо передать скрипту URL ZIP-архива:
+The script downloads the latest `yt-dlp` automatically. Place FFmpeg in `Kvasir/appdata` manually, or pass a ZIP archive URL to the script:
 
-```powershell
+~~~powershell
 .\scripts\download-dependencies.ps1 -FfmpegUrl "https://example.com/ffmpeg.zip"
-```
+~~~
 
-Передайте токен через переменную окружения текущего окна PowerShell:
+Pass the token through an environment variable in the current PowerShell session:
 
-```powershell
+~~~powershell
 $env:KVASIR_DISCORD_TOKEN = "YOUR_NEW_DISCORD_TOKEN"
 cd Kvasir
 dotnet run
-```
+~~~
 
-Для постоянного запуска задайте `KVASIR_DISCORD_TOKEN` в настройках среды операционной системы или менеджере секретов. Не записывайте токен в Git.
+For persistent use, set `KVASIR_DISCORD_TOKEN` in the operating system's environment settings or a secret manager. Do not commit the token to Git.
 
-После подключения выполните `/anchor` в текстовом канале, где должна находиться музыкальная панель. Затем войдите в голосовой канал и вызовите `/play`.
+Once connected, run `/anchor` in the text channel where the music panel should appear. Then join a voice channel and run `/play`.
 
-## Команды
+## Commands
 
-| Команда | Назначение |
+| Command | Purpose |
 |---|---|
-| `/play <запрос>` | Найти трек, добавить в очередь и начать воспроизведение |
-| `/pause` | Приостановить воспроизведение |
-| `/resume` | Продолжить воспроизведение |
-| `/skip` | Перейти к следующему треку |
-| `/clear` | Очистить очередь |
-| `/leave` | Отключить бота от голосового канала |
-| `/anchor` | Назначить текущий текстовый канал для музыкальной панели |
-| `/help` | Показать краткую справку |
+| `/play <query>` | Find a track, add it to the queue, and start playback |
+| `/pause` | Pause playback |
+| `/resume` | Resume playback |
+| `/skip` | Skip to the next track |
+| `/clear` | Clear the queue |
+| `/leave` | Disconnect the bot from the voice channel |
+| `/anchor` | Set the current text channel as the music panel channel |
+| `/help` | Show brief help |
 
-Команды `/reboot` и `/execute` доступны только пользователю с идентификатором `owner_id`. Не задавайте `owner_id`, если удалённое выполнение команд не требуется.
+The `/reboot` and `/execute` commands are available only to the user specified by `owner_id`. Leave `owner_id` unset if remote command execution is not needed.
 
 ## Spotify
 
-Spotify используется только для уточнения названия и исполнителя. Включите интеграцию в локальном `configuration.json`:
+Spotify is used only to refine track titles and artists. Enable the integration in your local `configuration.json`:
 
-```json
+~~~json
 {
   "spotify_settings": {
     "SPOTIFY_ENABLED": true,
@@ -107,28 +107,28 @@ Spotify используется только для уточнения назв
     "SPOTIFY_CLIENT_SECRET": "..."
   }
 }
-```
+~~~
 
-Этот файл исключён из Git. Без Spotify бот продолжает искать и загружать музыку через YouTube.
+This file is excluded from Git. Without Spotify, the bot continues to search for and download music through YouTube.
 
-## Сборка и выпуск
+## Build and release
 
-```powershell
+~~~powershell
 dotnet restore Kvasir.sln
 dotnet build Kvasir.sln --configuration Release --no-restore
 dotnet publish Kvasir/Kvasir.csproj --configuration Release --runtime win-x64 --self-contained false
-```
+~~~
 
-Теги вида `v*` запускают GitHub Actions: проект проверяется, публикуется для Windows x64, упаковывается в ZIP и прикрепляется к GitHub Release.
+Tags matching `v*` trigger GitHub Actions to validate the project, publish it for Windows x64, package it as a ZIP archive, and attach it to a GitHub Release.
 
-## Безопасность
+## Security
 
-- рабочий `Kvasir/appdata/configuration.json` не отслеживается Git;
-- токен Discord рекомендуется передавать только через `KVASIR_DISCORD_TOKEN`;
-- cookies, SQLite-база, логи, скачанная музыка и внешние исполняемые файлы исключены из репозитория;
-- `configuration.json.example` содержит только безопасные значения по умолчанию;
-- если токен когда-либо появился в сообщении, журнале или коммите, его нужно немедленно сбросить в Discord Developer Portal.
+- The working `Kvasir/appdata/configuration.json` is not tracked by Git.
+- Pass the Discord token only through `KVASIR_DISCORD_TOKEN` where possible.
+- Cookies, the SQLite database, logs, downloaded music, and external executables are excluded from the repository.
+- `configuration.json.example` contains only safe defaults.
+- If a token ever appears in a message, log, or commit, reset it immediately in the Discord Developer Portal.
 
-## Лицензии нативных компонентов
+## Native component licenses
 
-Вместе с `libdave.dll` и `opus.dll` распространяются соответствующие файлы `libdave-LICENSE` и `opus-COPYING`.
+`libdave.dll` and `opus.dll` are distributed with their corresponding `libdave-LICENSE` and `opus-COPYING` files.
