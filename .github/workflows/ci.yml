@@ -37,3 +37,6 @@ jobs:
 
     - name: Build solution
       run: dotnet build Kvasir.sln --configuration Release --no-restore --warnaserror
+
+    - name: Check Discord REST, Spotify SDK and SQLite migrations
+      run: dotnet run --project Kvasir.Integration.Tests/Kvasir.Integration.Tests.csproj --configuration Release -p:TreatWarningsAsErrors=true

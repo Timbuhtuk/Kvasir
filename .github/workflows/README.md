@@ -24,7 +24,24 @@ URL для скачивания yt-dlp.exe. Если не указан, буде
 ## Workflows
 
 ### CI
-Запускается при push и pull request в основные ветки. Проверяет, что проект собирается без ошибок.
+Запускается при push и pull request в основные ветки. Проверяет сборку, HTTP-контракты Discord и Spotify на тестовых ответах, а также реальные миграции и запросы SQLite.
+
+### External API health
+
+Запускается при push в `main`, по расписанию каждые пять минут и вручную через **Actions → External API health → Run workflow**. GitHub может задерживать задания и отключает расписание после 60 дней без активности в публичном репозитории. [Правила GitHub Actions](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule)
+
+Провал проверки даёт красный статус с именем провайдера. Пользователь, создавший или изменивший расписание, может включить **Actions → Only notify for failed workflows**. [Настройки уведомлений](https://github.com/settings/notifications), [правила доставки](https://docs.github.com/en/actions/concepts/workflows-and-actions/notifications-for-workflow-runs)
+
+YouTube использует публичные фикстуры. YoutubeExplode проверяется через поиск, плейлист и скачивание в Kvasir. YoutubeDLSharp отдельно скачивает аудио через yt-dlp и передаёт его в конвертер. Нативный прогон скачивает WAV с локального сервера и проверяет FFmpeg, Opus и DAVE. По желанию замените фикстуры в Actions variables `KVASIR_PROBE_YOUTUBE_VIDEO` и `KVASIR_PROBE_YOUTUBE_PLAYLIST`.
+
+| Проверка | Actions secrets | Actions variables |
+| --- | --- | --- |
+| Discord | `KVASIR_PROBE_DISCORD_TOKEN` | `KVASIR_PROBE_DISCORD_ENABLED=true`, `KVASIR_PROBE_DISCORD_GUILD`, `KVASIR_PROBE_DISCORD_TEXT`, `KVASIR_PROBE_DISCORD_VOICE` |
+| Spotify | `KVASIR_PROBE_SPOTIFY_CLIENT_ID`, `KVASIR_PROBE_SPOTIFY_CLIENT_SECRET` | `KVASIR_PROBE_SPOTIFY_ENABLED=true`, `KVASIR_PROBE_SPOTIFY_TRACK`, `KVASIR_PROBE_SPOTIFY_PLAYLIST` |
+
+Для Discord укажите ID тестового сервера, текстового и голосового каналов. Токен принадлежит отдельному боту с правом видеть каналы, подключаться к голосовому и говорить. Проверка передаёт один кадр тишины. Для Spotify укажите ссылки на доступные приложению трек и небольшой плейлист с треками. Импорт проверяется через найденные Kvasir результаты YouTube. Включённая проверка с отсутствующим параметром завершится ошибкой.
+
+Для запуска контрактов локально выполните `dotnet run --project Kvasir.Integration.Tests -c Release`. Для нативного прогона сначала соберите проект и запустите `scripts/install-test-media-tools.ps1 -Destination Kvasir.Integration.Tests/bin/Release/net10.0/appdata`, затем передайте `-- --native` в команду `dotnet run`.
 
 ### Release
 Запускается при создании тега `v*` или вручную. Собирает приложение и создает архив для релиза.
