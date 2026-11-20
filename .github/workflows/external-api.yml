@@ -13,7 +13,7 @@ permissions:
 jobs:
   youtube:
     name: YouTube providers and native libraries
-    runs-on: windows-latest
+    runs-on: ${{ vars.KVASIR_PROBE_YOUTUBE_RUNNER || 'windows-latest' }}
     timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
@@ -95,7 +95,7 @@ jobs:
     concurrency:
       group: kvasir-live-api-${{ matrix.provider }}
       cancel-in-progress: false
-    runs-on: windows-latest
+    runs-on: ${{ matrix.provider == 'Spotify' && vars.KVASIR_PROBE_YOUTUBE_RUNNER || 'windows-latest' }}
     timeout-minutes: 6
     steps:
       - uses: actions/checkout@v4

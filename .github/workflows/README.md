@@ -34,6 +34,8 @@ URL для скачивания yt-dlp.exe. Если не указан, буде
 
 YouTube использует публичные фикстуры. YoutubeExplode проверяется через поиск, плейлист и скачивание в Kvasir. YoutubeDLSharp отдельно скачивает аудио через yt-dlp и передаёт его в конвертер. Нативный прогон скачивает WAV с локального сервера и проверяет FFmpeg, Opus и DAVE. По желанию замените фикстуры в Actions variables `KVASIR_PROBE_YOUTUBE_VIDEO` и `KVASIR_PROBE_YOUTUBE_PLAYLIST`.
 
+Если YouTube требует вход с IP GitHub-hosted runner, в Actions variable `KVASIR_PROBE_YOUTUBE_RUNNER` можно указать метку выделенного Windows runner с доступом к публичным фикстурам. Эту же метку использует живой импорт Spotify, поскольку он также обращается к YouTube. Для публичного репозитория важна изоляция выделенного runner. [Рекомендации GitHub по self-hosted runners](https://docs.github.com/en/actions/reference/security/secure-use#hardening-for-self-hosted-runners)
+
 | Проверка | Actions secrets | Actions variables |
 | --- | --- | --- |
 | Discord | `KVASIR_PROBE_DISCORD_TOKEN` | `KVASIR_PROBE_DISCORD_ENABLED=true`, `KVASIR_PROBE_DISCORD_GUILD`, `KVASIR_PROBE_DISCORD_TEXT`, `KVASIR_PROBE_DISCORD_VOICE` |

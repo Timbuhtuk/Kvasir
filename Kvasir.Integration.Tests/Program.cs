@@ -83,6 +83,7 @@ internal static partial class Program
 
     private static async Task ProbeYoutubeAsync(string root)
     {
+        Logging.Logger.EnableConsoleLogging = true;
         var finder = new VideoFinderService(new ConfigurationBuilder().Build());
         string video = Fixture("KVASIR_PROBE_YOUTUBE_VIDEO", DefaultVideo);
         string playlist = Fixture("KVASIR_PROBE_YOUTUBE_PLAYLIST", DefaultPlaylist);
