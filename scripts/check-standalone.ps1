@@ -42,8 +42,9 @@ try {
         }
     }
 
-    & (Join-Path $payload 'bot/appdata/ffmpeg.exe') -version | Select-Object -First 1
-    if ($LASTEXITCODE -ne 0) { throw 'Bundled FFmpeg failed to start.' }
+    $ffmpegVersion = & (Join-Path $payload 'bot/appdata/ffmpeg.exe') -version
+    if ($LASTEXITCODE -ne 0) { throw "The bundled FFmpeg version check exited with code $LASTEXITCODE." }
+    $ffmpegVersion | Select-Object -First 1
     & (Join-Path $payload 'bot/appdata/yt-dlp.exe') --version
     if ($LASTEXITCODE -ne 0) { throw 'Bundled yt-dlp failed to start.' }
     Write-Host 'Standalone Kvasir started from a directory containing only its EXE.'

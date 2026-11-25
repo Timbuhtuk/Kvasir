@@ -59,7 +59,8 @@ if (!$YtDlpUrl) {
 }
 Get-ReleaseFile $YtDlpUrl (Join-Path $appData 'yt-dlp.exe') $ytDlpHash
 
-& (Join-Path $appData 'ffmpeg.exe') -version | Select-Object -First 1
-if ($LASTEXITCODE -ne 0) { throw 'ffmpeg.exe failed to start.' }
+$ffmpegVersion = & (Join-Path $appData 'ffmpeg.exe') -version
+if ($LASTEXITCODE -ne 0) { throw "The FFmpeg version check exited with code $LASTEXITCODE." }
+$ffmpegVersion | Select-Object -First 1
 & (Join-Path $appData 'yt-dlp.exe') --version
 if ($LASTEXITCODE -ne 0) { throw 'yt-dlp.exe failed to start.' }
