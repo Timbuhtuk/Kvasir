@@ -1,6 +1,7 @@
 param(
     [Parameter(Mandatory)]
-    [string]$Executable
+    [string]$Executable,
+    [switch]$CheckWindow
 )
 
 $ErrorActionPreference = 'Stop'
@@ -14,14 +15,22 @@ $previousCache = $env:DOTNET_BUNDLE_EXTRACT_BASE_DIR
 $process = $null
 try {
     $env:DOTNET_BUNDLE_EXTRACT_BASE_DIR = Join-Path $checkRoot 'extract'
-    $process = Start-Process -FilePath $isolatedExe -WorkingDirectory $checkRoot -WindowStyle Hidden -PassThru
-    $deadline = [DateTime]::UtcNow.AddSeconds(60)
-    do {
-        Start-Sleep -Milliseconds 250
-        $process.Refresh()
-        if ($process.HasExited) { throw "Standalone Kvasir exited during startup with code $($process.ExitCode)." }
-    } while ($process.MainWindowHandle -eq [IntPtr]::Zero -and [DateTime]::UtcNow -lt $deadline)
-    if ($process.MainWindowHandle -eq [IntPtr]::Zero) { throw 'Standalone Kvasir did not open its window.' }
+    $launch = @{ FilePath = $isolatedExe; WorkingDirectory = $checkRoot; WindowStyle = 'Hidden'; PassThru = $true }
+    if (!$CheckWindow) { $launch.ArgumentList = '--check-package' }
+    $process = Start-Process @launch
+    if ($CheckWindow) {
+        $deadline = [DateTime]::UtcNow.AddSeconds(45)
+        do {
+            Start-Sleep -Milliseconds 250
+            $process.Refresh()
+            if ($process.HasExited) { throw "Standalone Kvasir exited during startup with code $($process.ExitCode)." }
+        } while ($process.MainWindowHandle -eq [IntPtr]::Zero -and [DateTime]::UtcNow -lt $deadline)
+        if ($process.MainWindowHandle -eq [IntPtr]::Zero) { throw 'Standalone Kvasir did not open its window.' }
+        Write-Host 'Standalone Kvasir opened its desktop window.'
+    } else {
+        if (!$process.WaitForExit(60000)) { throw 'Standalone Kvasir timed out during its package check.' }
+        if ($process.ExitCode -ne 0) { throw "Standalone Kvasir failed its package check with code $($process.ExitCode)." }
+    }
 
     $desktop = Get-ChildItem -LiteralPath $env:DOTNET_BUNDLE_EXTRACT_BASE_DIR -Recurse -File -Filter Kvasir.Desktop.dll |
         Select-Object -First 1
@@ -37,7 +46,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Bundled FFmpeg failed to start.' }
     & (Join-Path $payload 'bot/appdata/yt-dlp.exe') --version
     if ($LASTEXITCODE -ne 0) { throw 'Bundled yt-dlp failed to start.' }
-    Write-Host 'Standalone Kvasir opened from a directory containing only its EXE.'
+    Write-Host 'Standalone Kvasir started from a directory containing only its EXE.'
 } finally {
     $env:DOTNET_BUNDLE_EXTRACT_BASE_DIR = $previousCache
     if ($process) {
