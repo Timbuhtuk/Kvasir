@@ -1,0 +1,126 @@
+name: External API health
+
+on:
+  schedule:
+    - cron: '2-59/5 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  youtube:
+    name: YouTube providers and native libraries
+    runs-on: windows-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Build current connectors
+        run: dotnet build tests/Kvasir.Tests/Kvasir.Tests.csproj -c Release --warnaserror -m:1 -p:UseSharedCompilation=false
+
+      - name: Set media-tools cache date
+        id: cache_date
+        run: |
+          $mediaCacheDate = [DateTime]::UtcNow.ToString('yyyyMMdd')
+          "date=$mediaCacheDate" >> $env:GITHUB_OUTPUT
+
+      - name: Restore media tools
+        id: media_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            tests/Kvasir.Tests/bin/Release/net10.0/appdata/ffmpeg.exe
+            tests/Kvasir.Tests/bin/Release/net10.0/appdata/yt-dlp.exe
+          key: kvasir-media-win-x64-${{ steps.cache_date.outputs.date }}-${{ hashFiles('scripts/install-test-media-tools.ps1') }}
+
+      - name: Install current media tools
+        id: media_tools
+        run: ./scripts/install-test-media-tools.ps1 -Destination tests/Kvasir.Tests/bin/Release/net10.0/appdata
+
+      - name: Save verified media tools
+        if: steps.media_cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            tests/Kvasir.Tests/bin/Release/net10.0/appdata/ffmpeg.exe
+            tests/Kvasir.Tests/bin/Release/net10.0/appdata/yt-dlp.exe
+          key: ${{ steps.media_cache.outputs.cache-primary-key }}
+
+      - name: FFmpeg, yt-dlp, Opus and DAVE
+        if: ${{ !cancelled() && steps.media_tools.outcome == 'success' }}
+        timeout-minutes: 3
+        run: dotnet run --project tests/Kvasir.Tests/Kvasir.Tests.csproj -c Release --no-build -- --native
+
+      - name: Set up Deno for YouTube extraction
+        id: deno
+        if: ${{ !cancelled() && steps.media_tools.outcome == 'success' }}
+        uses: denoland/setup-deno@v2
+
+      - name: yt-dlp metadata, search, playlist and audio
+        if: ${{ !cancelled() && steps.deno.outcome == 'success' }}
+        timeout-minutes: 5
+        env:
+          KVASIR_PROBE_YOUTUBE_VIDEO: ${{ vars.KVASIR_PROBE_YOUTUBE_VIDEO }}
+          KVASIR_PROBE_YOUTUBE_PLAYLIST: ${{ vars.KVASIR_PROBE_YOUTUBE_PLAYLIST }}
+        run: dotnet run --project tests/Kvasir.Tests/Kvasir.Tests.csproj -c Release --no-build -- --live-media-probe
+
+      - name: YoutubeExplode metadata, manifest and audio
+        if: ${{ !cancelled() && steps.media_tools.outcome == 'success' }}
+        timeout-minutes: 3
+        env:
+          KVASIR_PROBE_YOUTUBE_VIDEO: ${{ vars.KVASIR_PROBE_YOUTUBE_VIDEO }}
+        run: dotnet run --project tests/Kvasir.Tests/Kvasir.Tests.csproj -c Release --no-build -- --live-youtube-explode
+
+  authenticated:
+    name: ${{ matrix.provider }} live API
+    if: >-
+      github.ref_name == github.event.repository.default_branch &&
+      (vars.KVASIR_PROBE_SPOTIFY_ENABLED == 'true' || vars.KVASIR_PROBE_DISCORD_ENABLED == 'true')
+    strategy:
+      fail-fast: false
+      matrix:
+        provider: [Spotify, Discord]
+        exclude:
+          - provider: ${{ vars.KVASIR_PROBE_SPOTIFY_ENABLED != 'true' && 'Spotify' || '' }}
+          - provider: ${{ vars.KVASIR_PROBE_DISCORD_ENABLED != 'true' && 'Discord' || '' }}
+    concurrency:
+      group: kvasir-live-api-${{ matrix.provider }}
+      cancel-in-progress: false
+    runs-on: windows-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Build current connectors
+        run: dotnet build tests/Kvasir.Tests/Kvasir.Tests.csproj -c Release --warnaserror -m:1 -p:UseSharedCompilation=false
+
+      - name: Spotify OAuth, track and playlist
+        if: matrix.provider == 'Spotify'
+        env:
+          KVASIR_PROBE_SPOTIFY_CLIENT_ID: ${{ secrets.KVASIR_PROBE_SPOTIFY_CLIENT_ID }}
+          KVASIR_PROBE_SPOTIFY_CLIENT_SECRET: ${{ secrets.KVASIR_PROBE_SPOTIFY_CLIENT_SECRET }}
+          KVASIR_PROBE_SPOTIFY_TRACK: ${{ vars.KVASIR_PROBE_SPOTIFY_TRACK }}
+          KVASIR_PROBE_SPOTIFY_PLAYLIST: ${{ vars.KVASIR_PROBE_SPOTIFY_PLAYLIST }}
+        run: dotnet run --project tests/Kvasir.Tests/Kvasir.Tests.csproj -c Release --no-build -- --live-spotify
+
+      - name: Discord REST, Gateway and voice
+        if: matrix.provider == 'Discord'
+        env:
+          KVASIR_PROBE_DISCORD_TOKEN: ${{ secrets.KVASIR_PROBE_DISCORD_TOKEN }}
+          KVASIR_PROBE_DISCORD_GUILD: ${{ vars.KVASIR_PROBE_DISCORD_GUILD }}
+          KVASIR_PROBE_DISCORD_TEXT: ${{ vars.KVASIR_PROBE_DISCORD_TEXT }}
+          KVASIR_PROBE_DISCORD_VOICE: ${{ vars.KVASIR_PROBE_DISCORD_VOICE }}
+        run: dotnet run --project tests/Kvasir.Tests/Kvasir.Tests.csproj -c Release --no-build -- --live-discord

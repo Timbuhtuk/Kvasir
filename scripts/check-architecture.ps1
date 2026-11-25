@@ -1,4 +1,4 @@
-$applicationPath = Join-Path $PSScriptRoot "..\Application"
+$applicationPath = Join-Path $PSScriptRoot "..\src\Application"
 $forbiddenPattern = "NetCord|DSharpPlus|Discord\.Net|OpusEncodeStream|VoiceClient|GatewayClient|RestClient|SpotifyAPI|YoutubeDLSharp|YoutubeExplode"
 
 $violations = Get-ChildItem $applicationPath -Recurse -File |

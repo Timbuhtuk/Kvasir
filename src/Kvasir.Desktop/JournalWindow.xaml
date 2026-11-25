@@ -1,0 +1,49 @@
+<Window x:Class="Kvasir.Desktop.JournalWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:loc="clr-namespace:Kvasir.Desktop.Localization"
+        xmlns:icons="clr-namespace:Kvasir.Desktop.Assets"
+        xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
+        Title="{loc:Translate Log}" Width="900" Height="560" MinWidth="600" MinHeight="360"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False" Style="{StaticResource DialogWindow}"
+        WindowStyle="None" UseLayoutRounding="True" shell:WindowChrome.WindowChrome="{StaticResource KvasirWindowChrome}">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+        <Grid Style="{StaticResource WindowHeader}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <Image Style="{StaticResource WindowHeaderIcon}" />
+            <TextBlock Grid.Column="1" Text="{Binding Title, RelativeSource={RelativeSource AncestorType=Window}}"
+                       VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+            <Button Grid.Column="2" Content="{loc:Translate Clear}" Click="Clear_Click"
+                    Style="{StaticResource Ts.CompactButton}" VerticalAlignment="Center" Margin="8,0"
+                    shell:WindowChrome.IsHitTestVisibleInChrome="True" />
+            <StackPanel Grid.Column="3" Orientation="Horizontal">
+                <Button Style="{StaticResource CaptionButton}" Click="Minimize_Click"
+                        ToolTip="{loc:Translate Minimize}" AutomationProperties.Name="{loc:Translate Minimize}">
+                    <icons:SvgIcon Kind="Minimize" Width="15" Height="15" />
+                </Button>
+                <Button Style="{StaticResource CaptionButton}" Click="Maximize_Click"
+                        ToolTip="{loc:Translate MaximizeRestore}" AutomationProperties.Name="{loc:Translate MaximizeOrRestore}">
+                    <icons:SvgIcon Kind="Maximize" Width="15" Height="15" />
+                </Button>
+                <Button Style="{StaticResource CloseCaptionButton}" Click="Close_Click"
+                        ToolTip="{loc:Translate Close}" AutomationProperties.Name="{loc:Translate Close}">
+                    <icons:SvgIcon Kind="Close" Width="17" Height="17" />
+                </Button>
+            </StackPanel>
+        </Grid>
+        <TextBox Grid.Row="1" Margin="20" Text="{Binding LogText, Mode=OneWay}" IsReadOnly="True" AcceptsReturn="True"
+                 Style="{StaticResource Ts.MultilineInput}" FontFamily="Consolas" FontSize="13"
+                 VerticalContentAlignment="Top" HorizontalContentAlignment="Left"
+                 HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" TextChanged="Log_TextChanged"
+                 AutomationProperties.Name="{loc:Translate BotLog}" />
+    </Grid>
+</Window>

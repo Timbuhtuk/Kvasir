@@ -1,0 +1,18 @@
+<controls:ThemedDialogWindow x:Class="Kvasir.Desktop.ErrorDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:loc="clr-namespace:Kvasir.Desktop.Localization"
+        xmlns:controls="clr-namespace:Kvasir.Desktop.Controls"
+        xmlns:icons="clr-namespace:Kvasir.Desktop.Assets"
+        Title="{loc:Translate Error}" Width="520" SizeToContent="Height" ResizeMode="NoResize" WindowStartupLocation="CenterOwner" ShowInTaskbar="False" Style="{StaticResource DialogWindow}">
+    <Grid Margin="28"><Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+        <DockPanel><icons:SvgIcon DockPanel.Dock="Left" Kind="Warning" Width="26" Height="26" Margin="0,0,14,0" /><TextBlock x:Name="Heading" Style="{StaticResource Ts.SectionText}" TextWrapping="Wrap" /></DockPanel>
+        <TextBlock Grid.Row="1" x:Name="Description" TextWrapping="Wrap" Foreground="{DynamicResource Ts.TextSecondary}" Margin="0,18,0,12" />
+        <TextBlock Grid.Row="2" x:Name="Recovery" TextWrapping="Wrap" Margin="0,0,0,26" />
+        <WrapPanel Grid.Row="3" HorizontalAlignment="Right">
+            <Button Content="{loc:Translate Log}" Click="Journal_Click" Style="{StaticResource ActionButton}" />
+            <Button x:Name="RemedyButton" Click="Remedy_Click" Style="{StaticResource Ts.PrimaryButton}" Margin="0,0,8,8" />
+            <Button Content="{loc:Translate Close}" IsCancel="True" IsDefault="True" Click="Close_Click" Style="{StaticResource Ts.CompactButton}" Margin="0,0,0,8" />
+        </WrapPanel>
+    </Grid>
+</controls:ThemedDialogWindow>

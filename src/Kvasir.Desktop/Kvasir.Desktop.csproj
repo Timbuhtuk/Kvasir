@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>..\Kvasir\appdata\ds_bot_logo.ico</ApplicationIcon>
+    <RestoreAdditionalProjectSources>$(MSBuildThisFileDirectory)..\..\vendor\nuget;$(RestoreAdditionalProjectSources)</RestoreAdditionalProjectSources>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Tessera.WpfStyles" Version="0.3.0" />
+    <ProjectReference Include="..\Kvasir.Control\Kvasir.Control.csproj" />
+    <ProjectReference Include="..\Kvasir.Configuration\Kvasir.Configuration.csproj" />
+    <ProjectReference Include="..\Kvasir\Kvasir.csproj" ReferenceOutputAssembly="false" />
+    <Content Include="..\Kvasir\appdata\configuration.json.example" Link="Defaults\configuration.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Resource Include="..\Kvasir\appdata\ds_bot_logo.ico" Link="ds_bot_logo.ico" />
+    <Resource Include="Assets\Icons\*.svg" />
+    <EmbeddedResource Include="Localization\*.json" LogicalName="Kvasir.Localization.%(Filename)%(Extension)" />
+    <Content Include="..\..\docs\DESKTOP.md" Link="DESKTOP.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\..\docs\DESKTOP-VALIDATION.md" Link="DESKTOP-VALIDATION.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\..\vendor\Tessera.WpfStyles\licenses\*.txt" Link="licenses\%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+  <Target Name="CopyBotForDesktop" AfterTargets="Build">
+    <MSBuild Projects="..\Kvasir\Kvasir.csproj" Targets="GetTargetPath" Properties="Configuration=$(Configuration);TargetFramework=net10.0">
+      <Output TaskParameter="TargetOutputs" ItemName="BotAssembly" />
+    </MSBuild>
+    <ItemGroup>
+      <BotOutput Include="%(BotAssembly.RootDir)%(BotAssembly.Directory)**\*" Exclude="%(BotAssembly.RootDir)%(BotAssembly.Directory)publish\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(BotOutput)" DestinationFiles="@(BotOutput->'$(TargetDir)bot\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+  </Target>
+</Project>

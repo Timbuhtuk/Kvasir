@@ -5,7 +5,7 @@ param(
     [string]$YtDlpUrl = ""
 )
 
-$appdataPath = Join-Path $PSScriptRoot "..\Kvasir\appdata"
+$appdataPath = Join-Path $PSScriptRoot "..\src\Kvasir\appdata"
 New-Item -ItemType Directory -Force -Path $appdataPath | Out-Null
 
 Write-Host "Downloading dependencies to $appdataPath" -ForegroundColor Green

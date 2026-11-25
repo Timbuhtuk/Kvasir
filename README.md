@@ -13,6 +13,8 @@
 
 Kvasir воспроизводит музыку в голосовых каналах Discord, управляет очередью и плейлистами и показывает интерактивную музыкальную панель. Ядро не зависит от конкретной Discord-библиотеки: при очередном изменении API переписывается коннектор, а не логика бота.
 
+В комплект входит WPF-пульт на Tessera.WpfStyles: запуск бота, управление музыкой, очередь, библиотека, правила сервера, диагностика и журнал без работы с консолью.
+
 ## Возможности
 
 - поиск по названию и прямой ссылке;
@@ -24,6 +26,13 @@ Kvasir воспроизводит музыку в голосовых канал�
 - локальное хранение в SQLite;
 - голосовое соединение Discord с DAVE/E2EE;
 - журналирование по серверам и категориям.
+- отдельный WPF-пульт с чтением конфигурации из файла и общим с Discord состоянием музыки.
+
+## Структура репозитория
+
+Основное решение [Kvasir.sln](Kvasir.sln) включает проекты из `src/` и проверки из `tests/`. Поиск и обработку аудио можно открыть отдельно в [Kvasir.Media.sln](src/Kvasir.Media/Kvasir.Media.sln).
+
+Документация находится в `docs/`, учебные примеры рефакторинга — в `examples/Refactoring/`, скрипты сборки и подготовки зависимостей — в `scripts/`. Локальные результаты публикации и проверки хранятся в `artifacts/`.
 
 ## Архитектура
 
@@ -31,11 +40,11 @@ Kvasir воспроизводит музыку в голосовых канал�
 Entities ← Application ← Infrastructure
                ↑               ↑
                │               │
-     Connectors/Media     Kvasir/Connectors
+     src/Connectors/Media     src/Kvasir/Connectors
    Spotify / YouTube          NetCord
 ```
 
-`Application` работает только с интерфейсами `IBotConnector`, `IBotVoiceConnection`, `IVideoFinderService` и `IAudioDownloaderService`. NetCord находится на внешней границе проекта. Подробности и порядок замены библиотеки описаны в [ARCHITECTURE.md](ARCHITECTURE.md).
+`Application` работает только с интерфейсами `IBotConnector`, `IBotVoiceConnection`, `IVideoFinderService` и `IAudioDownloaderService`. NetCord находится на внешней границе проекта. Подробности и порядок замены библиотеки описаны в [ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 Граница автоматически проверяется командой:
 
@@ -46,41 +55,72 @@ Entities ← Application ← Infrastructure
 ## Требования
 
 - Windows x64;
-- [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) для сборки или .NET 10 Runtime для готового релиза;
+- [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) для сборки; готовый self-contained ZIP содержит необходимые среды .NET;
 - Discord-приложение с ботом и разрешениями `Guilds`, `Guild Messages`, `Message Content`, `Guild Voice States`;
-- `ffmpeg.exe`, `ffplay.exe` и `ffprobe.exe` в `Kvasir/appdata`;
-- `yt-dlp.exe` в `Kvasir/appdata`.
+- `ffmpeg.exe`, `ffplay.exe` и `ffprobe.exe` в `src/Kvasir/appdata`;
+- `yt-dlp.exe` в `src/Kvasir/appdata`.
 
 Нативные библиотеки DAVE и Opus уже входят в репозиторий и готовый релиз.
+
+## Пульт WPF
+
+Выберите `Kvasir.Desktop` запускаемым проектом в Visual Studio или выполните:
+
+```powershell
+dotnet build Kvasir.sln -c Release -m:1 -p:UseSharedCompilation=false
+dotnet run --project src/Kvasir.Desktop/Kvasir.Desktop.csproj -c Release --no-build
+```
+
+После запуска бота выберите сервер и голосовой канал. В пульте доступны:
+
+- запуск и остановка процесса бота;
+- текущий трек, пауза, продолжение, пропуск, повтор, перемотка и громкость;
+- добавление запросов, удаление и перестановка заказов в общей с Discord очереди;
+- личные/общие плейлисты, порядок треков, импорт с прогрессом, история;
+- роль DJ, голосование, справедливая очередь и лимиты участников;
+- диагностика зависимостей, очистка и восстановление кэша;
+- состояние процесса и живой журнал `stdout` / `stderr`;
+- темы Tessera Dark, Light и Contrast.
+
+Токен читается из массива `tokens` в `%LOCALAPPDATA%\Kvasir\configuration.json` при каждом запуске. Папка определяется стандартным API Windows и одинакова для пульта, бота и любой копии приложения. Шестерёнка слева от кнопки сворачивания открывает отдельное окно настроек: тема, конфигурация и папка данных. Достаточно один раз заполнить файл. Тема сохраняется между запусками. При закрытии окна пульт запрашивает штатную остановку и ждёт завершения аудио/импорта. Если бот не успел завершиться за 40 секунд, окно остаётся открытым с сообщением.
+
+Пульт управляет запущенным им ботом через именованный канал Windows, доступный только текущему пользователю. Локальный оператор имеет права администратора бота; его заказы и созданные плейлисты записываются от Discord ID самого бота. Очередь, библиотека и настройки не копируются в отдельную модель хранения. Подробнее: [DESKTOP.md](docs/DESKTOP.md).
+
+Настоящий пакет `Tessera.WpfStyles 0.3.0` находится в `vendor/nuget`; проект подключает этот источник относительным путём. Внешний checkout Tessera для сборки не нужен. MIT и лицензии шрифтов находятся в `vendor/Tessera.WpfStyles/licenses` и копируются в релиз.
 
 ## Быстрый запуск из исходников
 
 ```powershell
 git clone https://github.com/Timbuhtuk/Kvasir.git
 cd Kvasir
-Copy-Item Kvasir/appdata/configuration.json.example Kvasir/appdata/configuration.json
 .\scripts\download-dependencies.ps1
 ```
 
-Скрипт автоматически скачивает свежий `yt-dlp`. FFmpeg можно положить в `Kvasir/appdata` вручную либо передать скрипту URL ZIP-архива:
+Скрипт автоматически скачивает свежий `yt-dlp`. FFmpeg можно положить в `src/Kvasir/appdata` вручную либо передать скрипту URL ZIP-архива:
 
 ```powershell
 .\scripts\download-dependencies.ps1 -FfmpegUrl "https://example.com/ffmpeg.zip"
 ```
 
-Передайте токен через переменную окружения текущего окна PowerShell:
+При первом запуске приложение создаёт `%LOCALAPPDATA%\Kvasir\configuration.json` из встроенного шаблона. Откройте его через настройки пульта и один раз укажите токен:
 
-```powershell
-$env:KVASIR_DISCORD_TOKEN = "YOUR_NEW_DISCORD_TOKEN"
-cd Kvasir
-dotnet run
+```json
+"tokens": ["YOUR_DISCORD_BOT_TOKEN"]
 ```
 
-Для постоянного запуска задайте `KVASIR_DISCORD_TOKEN` в настройках среды операционной системы или менеджере секретов. Не записывайте токен в Git.
+Затем запускайте бот через пульт или консоль:
+
+```powershell
+dotnet run --project src/Kvasir/Kvasir.csproj
+```
+
+Бот повторно читает сохранённый файл при каждом запуске. Для консольного запуска дополнительно поддерживается `KVASIR_DISCORD_TOKEN`, если в конфигурации токена нет. При переходе со старой версии перенесите свою конфигурацию в папку Kvasir в AppData. Существующий файл никогда не заменяется шаблоном.
 
 После подключения выполните `/anchor` в текстовом канале, где должна находиться музыкальная панель. Затем войдите в голосовой канал и вызовите `/play`.
 
 ## Команды
+
+Музыкальная панель использует **Discord Components V2**: общую карточку плеера и персональные меню очереди, библиотеки, воспроизведения, режима компании и диагностики. Поддерживаются перестановка заказов, голосование за пропуск, роль DJ, личные/общие плейлисты без ограничения в 23 трека, импорт с отчётом, перемотка, громкость и управляемый кэш. Подробности: [DISCORD_PANEL.md](docs/DISCORD_PANEL.md).
 
 | Команда | Назначение |
 |---|---|
@@ -91,6 +131,7 @@ dotnet run
 | `/clear` | Очистить очередь |
 | `/leave` | Отключить бота от голосового канала |
 | `/anchor` | Назначить текущий текстовый канал для музыкальной панели |
+| `/panel` | Открыть персональную музыкальную библиотеку |
 | `/help` | Показать краткую справку |
 
 Команды `/reboot` и `/execute` доступны только пользователю с идентификатором `owner_id`. Не задавайте `owner_id`, если удалённое выполнение команд не требуется.
@@ -115,16 +156,19 @@ Spotify используется только для уточнения назв
 
 ```powershell
 dotnet restore Kvasir.sln
-dotnet build Kvasir.sln --configuration Release --no-restore
-dotnet publish Kvasir/Kvasir.csproj --configuration Release --runtime win-x64 --self-contained false
+dotnet build Kvasir.sln --configuration Release --no-restore -m:1 -p:UseSharedCompilation=false
+dotnet publish src/Kvasir/Kvasir.csproj -c Release -r win-x64 --self-contained true -o artifacts/publish/win-x64/bot -m:1 -p:UseSharedCompilation=false
+dotnet publish src/Kvasir.Desktop/Kvasir.Desktop.csproj -c Release -r win-x64 --self-contained true -o artifacts/publish/win-x64 -m:1 -p:UseSharedCompilation=false
 ```
 
 Теги вида `v*` запускают GitHub Actions: проект проверяется, публикуется для Windows x64, упаковывается в ZIP и прикрепляется к GitHub Release.
 
+Новые релизы содержат `Kvasir.Desktop.exe` в корне архива и сам бот в папке `bot`. Оба приложения публикуются self-contained, отдельная установка .NET для готового ZIP не требуется. Комплект содержит только шаблоны `Defaults/configuration.json`; пользовательская конфигурация, база и настройки остаются в AppData и при обновлении не перезаписываются. После сборки решения бот также автоматически размещается рядом с WPF в папке `bot`.
+
 ## Безопасность
 
-- рабочий `Kvasir/appdata/configuration.json` не отслеживается Git;
-- токен Discord рекомендуется передавать только через `KVASIR_DISCORD_TOKEN`;
+- рабочая конфигурация хранится в `%LOCALAPPDATA%\Kvasir` и не входит в репозиторий;
+- токен Discord хранится в локальной конфигурации; пульт маскирует его в своём журнале;
 - cookies, SQLite-база, логи, скачанная музыка и внешние исполняемые файлы исключены из репозитория;
 - `configuration.json.example` содержит только безопасные значения по умолчанию;
 - если токен когда-либо появился в сообщении, журнале или коммите, его нужно немедленно сбросить в Discord Developer Portal.

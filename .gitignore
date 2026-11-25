@@ -194,6 +194,7 @@ PublishScripts/
 
 # NuGet Packages
 *.nupkg
+!vendor/nuget/Tessera.WpfStyles.0.3.0.nupkg
 # NuGet Symbol Packages
 *.snupkg
 # The packages folder can be ignored because of Package Restore
@@ -371,15 +372,19 @@ FodyWeavers.xsd
 .packages/
 .dotnet10/
 .netcord-upstream/
+.publish-*/
+.soundboard-test/
 
 # AppData - сторонние исполняемые файлы и конфиденциальные данные
-Kvasir/appdata/ffmpeg.exe
-Kvasir/appdata/ffplay.exe
-Kvasir/appdata/ffprobe.exe
-Kvasir/appdata/yt-dlp.exe
-Kvasir/appdata/configuration.json
-Kvasir/appdata/youtubeCookies.txt
-Kvasir/appdata/DiscordMusicDB.db
-Kvasir/appdata/DiscordMusicDB.db-shm
-Kvasir/appdata/DiscordMusicDB.db-wal
-Kvasir/appdata/SavedMusic.Json
+src/Kvasir/appdata/ffmpeg.exe
+src/Kvasir/appdata/ffplay.exe
+src/Kvasir/appdata/ffprobe.exe
+src/Kvasir/appdata/yt-dlp.exe
+src/Kvasir/appdata/configuration.json
+src/Kvasir/appdata/youtubeCookies.txt
+src/Kvasir/appdata/DiscordMusicDB.db
+src/Kvasir/appdata/DiscordMusicDB.db-shm
+src/Kvasir/appdata/DiscordMusicDB.db-wal
+src/Kvasir/appdata/SavedMusic.Json
+**/appdata/music-preferences.json
+*.pcm.part

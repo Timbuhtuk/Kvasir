@@ -1,0 +1,30 @@
+<controls:ThemedDialogWindow x:Class="Kvasir.Desktop.TokenDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:loc="clr-namespace:Kvasir.Desktop.Localization"
+        xmlns:controls="clr-namespace:Kvasir.Desktop.Controls"
+        Title="{loc:Translate DiscordBotToken}" Width="560" SizeToContent="Height" ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False" Style="{StaticResource DialogWindow}">
+    <StackPanel Margin="28">
+        <TextBlock x:Name="Heading" Text="{loc:Translate ConnectDiscordBot}" Style="{StaticResource Ts.SectionText}" TextWrapping="Wrap" />
+        <TextBlock x:Name="Reason" Text="{loc:Translate MissingTokenHint}" Foreground="{DynamicResource Ts.TextSecondary}" TextWrapping="Wrap" Margin="0,14,0,22" />
+        <TextBlock Text="{loc:Translate BotTokenField}" Style="{StaticResource FieldLabel}" />
+        <PasswordBox x:Name="TokenBox" MinHeight="40" Padding="10" AutomationProperties.Name="{loc:Translate DiscordBotToken}" PasswordChanged="Token_Changed" />
+        <TextBlock Text="{loc:Translate TokenStorageHint}" Foreground="{DynamicResource Ts.TextSecondary}" TextWrapping="Wrap" Margin="0,10,0,0" />
+        <TextBlock x:Name="Validation" TextWrapping="Wrap" Margin="0,14,0,0" AutomationProperties.LiveSetting="Polite">
+            <TextBlock.Style>
+                <Style TargetType="TextBlock" BasedOn="{StaticResource Ts.ErrorText}">
+                    <Style.Triggers>
+                        <Trigger Property="Text" Value="">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                        </Trigger>
+                    </Style.Triggers>
+                </Style>
+            </TextBlock.Style>
+        </TextBlock>
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,22,0,0">
+            <Button Content="{loc:Translate Later}" IsCancel="True" Style="{StaticResource Ts.CompactButton}" Margin="0,0,10,0" />
+            <Button x:Name="SaveButton" Content="{loc:Translate SaveAndStart}" IsDefault="True" Click="Save_Click" Style="{StaticResource Ts.PrimaryButton}" />
+        </StackPanel>
+    </StackPanel>
+</controls:ThemedDialogWindow>

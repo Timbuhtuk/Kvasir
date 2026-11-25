@@ -1,0 +1,863 @@
+<Window x:Class="Kvasir.Desktop.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:loc="clr-namespace:Kvasir.Desktop.Localization"
+        xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
+        xmlns:icons="clr-namespace:Kvasir.Desktop.Assets"
+        xmlns:controls="clr-namespace:Kvasir.Desktop.Controls"
+        xmlns:vm="clr-namespace:Kvasir.Desktop.ViewModels"
+        xmlns:protocol="clr-namespace:Kvasir.Control;assembly=Kvasir.Control"
+        xmlns:tessera="clr-namespace:Tessera.WpfStyles.Controls;assembly=Tessera.WpfStyles"
+        xmlns:motion="clr-namespace:Tessera.WpfStyles.Motion;assembly=Tessera.WpfStyles"
+        Title="Kvasir" Width="1220" Height="820" MinWidth="980" MinHeight="680"
+        Icon="ds_bot_logo.ico" WindowStartupLocation="CenterScreen"
+        Closing="Window_Closing" UseLayoutRounding="True" Style="{StaticResource {x:Type Window}}" WindowStyle="None"
+        shell:WindowChrome.WindowChrome="{StaticResource KvasirWindowChrome}">
+    <Window.Resources>
+        <icons:DurationConverter x:Key="Duration" />
+        <BooleanToVisibilityConverter x:Key="Visible" />
+        <SolidColorBrush x:Key="BotDisconnectedBrush" Color="#E34F56" />
+        <SolidColorBrush x:Key="BotConnectingBrush" Color="#DE861D" />
+        <SolidColorBrush x:Key="BotConnectedBrush" Color="#339E68" />
+        <Style x:Key="WorkLoader" TargetType="tessera:CarouselLoader">
+            <Setter Property="HorizontalAlignment" Value="Left" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="LayoutTransform">
+                <Setter.Value><ScaleTransform ScaleX="0.25" ScaleY="0.25" /></Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="IsVisible" Value="False">
+                    <Setter Property="IsPaused" Value="True" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="TrackDownloadIndicator" TargetType="ContentControl">
+            <Setter Property="Width" Value="32" />
+            <Setter Property="Focusable" Value="False" />
+            <Setter Property="Visibility" Value="Collapsed" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding DownloadState}" Value="{x:Static protocol:TrackDownloadState.Pending}">
+                    <Setter Property="Visibility" Value="Visible" />
+                    <Setter Property="ToolTip" Value="{loc:Translate TrackNotDownloaded}" />
+                    <Setter Property="AutomationProperties.Name" Value="{loc:Translate TrackNotDownloaded}" />
+                    <Setter Property="Template">
+                        <Setter.Value>
+                            <ControlTemplate TargetType="ContentControl">
+                                <Grid Background="Transparent">
+                                    <icons:SvgIcon Kind="Warning" Width="16" Height="16" Foreground="{DynamicResource Ts.Text}" />
+                                </Grid>
+                            </ControlTemplate>
+                        </Setter.Value>
+                    </Setter>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding DownloadState}" Value="{x:Static protocol:TrackDownloadState.Downloading}">
+                    <Setter Property="Visibility" Value="Visible" />
+                    <Setter Property="ToolTip" Value="{loc:Translate TrackDownloading}" />
+                    <Setter Property="AutomationProperties.Name" Value="{loc:Translate TrackDownloading}" />
+                    <Setter Property="Template">
+                        <Setter.Value>
+                            <ControlTemplate TargetType="ContentControl">
+                                <Grid Background="Transparent">
+                                    <ProgressBar Width="20" Height="4" IsIndeterminate="True"
+                                                 HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                 AutomationProperties.Name="{loc:Translate TrackDownloading}">
+                                        <ProgressBar.Style>
+                                            <Style TargetType="ProgressBar" BasedOn="{StaticResource Ts.ProgressBar}">
+                                                <Style.Triggers>
+                                                    <Trigger Property="IsVisible" Value="False">
+                                                        <Setter Property="motion:BusyProgressMotion.IsEnabled" Value="False" />
+                                                    </Trigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </ProgressBar.Style>
+                                    </ProgressBar>
+                                </Grid>
+                            </ControlTemplate>
+                        </Setter.Value>
+                    </Setter>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="IconButton" TargetType="Button" BasedOn="{StaticResource Ts.CompactButton}">
+            <Setter Property="Width" Value="36" /><Setter Property="Height" Value="36" />
+            <Setter Property="MinHeight" Value="0" /><Setter Property="Padding" Value="6" />
+            <Setter Property="Background" Value="Transparent" /><Setter Property="BorderThickness" Value="0" />
+            <Setter Property="ToolTipService.InitialShowDelay" Value="250" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" /><Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+        <Style x:Key="HeaderIconButton" TargetType="Button" BasedOn="{StaticResource IconButton}">
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="shell:WindowChrome.IsHitTestVisibleInChrome" Value="True" />
+        </Style>
+        <Style x:Key="PlayPauseButton" TargetType="Button" BasedOn="{StaticResource IconButton}">
+            <Setter Property="Width" Value="44" />
+            <Setter Property="Height" Value="44" />
+            <Setter Property="Background" Value="{DynamicResource Ts.Raised}" />
+        </Style>
+        <Style x:Key="PlaybackPanelButtonStyle" TargetType="ToggleButton" BasedOn="{StaticResource {x:Type ToggleButton}}">
+            <Setter Property="Width" Value="36" /><Setter Property="Height" Value="36" />
+            <Setter Property="MinHeight" Value="0" /><Setter Property="Padding" Value="6" />
+            <Setter Property="Background" Value="Transparent" /><Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="ToolTip" Value="{loc:Translate OpenPlaybackPanel}" />
+            <Style.Triggers>
+                <Trigger Property="IsChecked" Value="True">
+                    <Setter Property="ToolTip" Value="{loc:Translate ClosePlaybackPanel}" />
+                    <Setter Property="Foreground" Value="{DynamicResource Ts.Accent}" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="PlaybackPanelTrackItem" TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}">
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Padding" Value="4,5" />
+            <Setter Property="AutomationProperties.Name" Value="{Binding}" />
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <Border x:Name="TrackFrame" Background="Transparent" BorderBrush="Transparent" BorderThickness="1"
+                                Padding="{TemplateBinding Padding}" SnapsToDevicePixels="True">
+                            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                              VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="TrackFrame" Property="Background" Value="{DynamicResource Ts.Hover}" />
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="TrackFrame" Property="Background" Value="{DynamicResource Ts.Raised}" />
+                                <Setter TargetName="TrackFrame" Property="BorderBrush" Value="{DynamicResource Ts.BorderStrong}" />
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                                <Setter TargetName="TrackFrame" Property="BorderBrush" Value="{DynamicResource Ts.Focus}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="PlaybackPanelList" TargetType="ListBox" BasedOn="{StaticResource {x:Type ListBox}}">
+            <Style.Resources>
+                <Style TargetType="ScrollViewer" BasedOn="{StaticResource {x:Type ScrollViewer}}">
+                    <Setter Property="Background" Value="Transparent" />
+                </Style>
+            </Style.Resources>
+            <Setter Property="ItemContainerStyle" Value="{StaticResource PlaybackPanelTrackItem}" />
+            <Setter Property="BorderThickness" Value="0" /><Setter Property="Background" Value="Transparent" />
+            <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled" />
+            <Setter Property="VirtualizingPanel.VirtualizationMode" Value="Recycling" />
+        </Style>
+        <DataTemplate x:Key="PlaybackPanelTrack">
+            <Grid>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                <Border Width="40" Height="40" CornerRadius="4" Background="{DynamicResource Ts.Raised}" Margin="0,0,10,0">
+                    <Grid>
+                        <Grid.Clip><RectangleGeometry Rect="0,0,40,40" RadiusX="4" RadiusY="4" /></Grid.Clip>
+                        <icons:SvgIcon Kind="Music" Width="18" Height="18" Foreground="{DynamicResource Ts.TextMuted}" />
+                        <controls:TrackCover Link="{Binding Link}" Stretch="UniformToFill"
+                                             HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False" />
+                    </Grid>
+                </Border>
+                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip="{Binding Name}" />
+                    <TextBlock Text="{Binding Author}" Foreground="{DynamicResource Ts.TextSecondary}" TextTrimming="CharacterEllipsis" Margin="0,2,0,0" ToolTip="{Binding Author}" />
+                </StackPanel>
+                <TextBlock Grid.Column="2" Text="{Binding Duration, Converter={StaticResource Duration}}" FontSize="12"
+                           Foreground="{DynamicResource Ts.TextSecondary}" VerticalAlignment="Center" Margin="8,0,4,0" />
+            </Grid>
+        </DataTemplate>
+        <Style x:Key="NavItem" TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}">
+            <Setter Property="Padding" Value="7,12" /><Setter Property="Margin" Value="0,0,0,4" />
+            <Setter Property="Foreground" Value="{DynamicResource Ts.TextSecondary}" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ListBoxItem">
+                <Border x:Name="Tile" Background="Transparent" BorderBrush="Transparent" BorderThickness="2,0,0,0" Padding="{TemplateBinding Padding}">
+                    <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" />
+                </Border>
+                <ControlTemplate.Triggers>
+                    <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Tile" Property="Background" Value="{DynamicResource Ts.Hover}" /></Trigger>
+                    <Trigger Property="IsSelected" Value="True"><Setter TargetName="Tile" Property="Background" Value="{DynamicResource Ts.Raised}" /><Setter TargetName="Tile" Property="BorderBrush" Value="{DynamicResource Ts.Text}" /><Setter Property="Foreground" Value="{DynamicResource Ts.Text}" /></Trigger>
+                    <Trigger Property="IsKeyboardFocusWithin" Value="True"><Setter TargetName="Tile" Property="BorderBrush" Value="{DynamicResource Ts.TextSecondary}" /></Trigger>
+                </ControlTemplate.Triggers>
+            </ControlTemplate></Setter.Value></Setter>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsChecked, ElementName=NavigationToggle}" Value="True">
+                    <Setter Property="Padding" Value="0,12,2,12" />
+                    <Setter Property="HorizontalContentAlignment" Value="Center" />
+                    <Setter Property="ToolTip" Value="{Binding (AutomationProperties.Name), RelativeSource={RelativeSource Self}}" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="NavLabel" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+            <Setter Property="Margin" Value="8,0,0,0" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsChecked, ElementName=NavigationToggle}" Value="True">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="PlaylistItem" TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}">
+            <Setter Property="Padding" Value="10,3" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <Border x:Name="Frame" Background="{TemplateBinding Background}" BorderBrush="Transparent"
+                                BorderThickness="1" SnapsToDevicePixels="True">
+                            <Grid>
+                                <ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                                  VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+                                <Border x:Name="SelectionMark" Width="2" HorizontalAlignment="Left" Background="{DynamicResource Ts.Accent}"
+                                        Visibility="Collapsed" IsHitTestVisible="False" />
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="SelectionMark" Property="Visibility" Value="Visible" />
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                                <Setter TargetName="Frame" Property="BorderBrush" Value="{DynamicResource Ts.Focus}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="ServerTab" TargetType="TabItem" BasedOn="{StaticResource Ts.UnderlineTabItem}">
+            <Setter Property="Padding" Value="12,0,4,0" />
+            <Setter Property="MinHeight" Value="29" />
+            <Setter Property="MinWidth" Value="150" />
+            <Setter Property="MaxWidth" Value="280" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="AutomationProperties.Name" Value="{Binding Name}" />
+            <Style.Triggers>
+                <Trigger Property="IsSelected" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource Ts.Canvas}" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="TableHeader" TargetType="DataGridColumnHeader" BasedOn="{StaticResource {x:Type DataGridColumnHeader}}">
+            <Setter Property="Background" Value="{DynamicResource Ts.Canvas}" />
+            <Setter Property="Foreground" Value="{DynamicResource Ts.TextSecondary}" />
+            <Setter Property="BorderThickness" Value="0,0,0,1" />
+            <Setter Property="Padding" Value="10,0" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="FontWeight" Value="Normal" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="ContentTemplate">
+                <Setter.Value>
+                    <DataTemplate>
+                        <DockPanel>
+                            <Path x:Name="SortArrow" DockPanel.Dock="Right" VerticalAlignment="Center" Margin="6,0,0,0"
+                                  Fill="{DynamicResource Ts.Accent}" Visibility="Collapsed" Data="M 0,5 L 4,1 L 8,5 Z" />
+                            <TextBlock Text="{Binding}" FontSize="12" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
+                        </DockPanel>
+                        <DataTemplate.Triggers>
+                            <DataTrigger Binding="{Binding SortDirection, RelativeSource={RelativeSource AncestorType=DataGridColumnHeader}}" Value="Ascending">
+                                <Setter TargetName="SortArrow" Property="Visibility" Value="Visible" />
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding SortDirection, RelativeSource={RelativeSource AncestorType=DataGridColumnHeader}}" Value="Descending">
+                                <Setter TargetName="SortArrow" Property="Visibility" Value="Visible" />
+                                <Setter TargetName="SortArrow" Property="Data" Value="M 0,1 L 4,5 L 8,1 Z" />
+                            </DataTrigger>
+                        </DataTemplate.Triggers>
+                    </DataTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="CompactTableHeader" TargetType="DataGridColumnHeader" BasedOn="{StaticResource TableHeader}">
+            <Setter Property="Padding" Value="4,0" />
+        </Style>
+        <Style x:Key="DurationHeader" TargetType="DataGridColumnHeader" BasedOn="{StaticResource CompactTableHeader}">
+            <Setter Property="HorizontalContentAlignment" Value="Right" />
+        </Style>
+        <Style x:Key="TableCell" TargetType="DataGridCell" BasedOn="{StaticResource {x:Type DataGridCell}}">
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="0" />
+            <Style.Triggers>
+                <Trigger Property="IsKeyboardFocused" Value="True">
+                    <Setter Property="BorderBrush" Value="{DynamicResource Ts.Focus}" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="TableText" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+            <Setter Property="Margin" Value="9,0" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="TextWrapping" Value="NoWrap" />
+            <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+            <Setter Property="Foreground" Value="{DynamicResource Ts.TextSecondary}" />
+        </Style>
+        <Style x:Key="TableTitle" TargetType="TextBlock" BasedOn="{StaticResource TableText}">
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="{DynamicResource Ts.Text}" />
+        </Style>
+        <Style x:Key="TableDuration" TargetType="TextBlock" BasedOn="{StaticResource TableText}">
+            <Setter Property="TextAlignment" Value="Right" />
+            <Setter Property="Margin" Value="4,0" />
+        </Style>
+        <Style x:Key="TableDetail" TargetType="TextBlock" BasedOn="{StaticResource TableText}">
+            <Setter Property="ToolTip" Value="{Binding Text, RelativeSource={RelativeSource Self}}" />
+        </Style>
+        <Style x:Key="TrackGrid" TargetType="DataGrid" BasedOn="{StaticResource {x:Type DataGrid}}">
+            <Style.Resources>
+                <Style TargetType="DataGridColumnHeader" BasedOn="{StaticResource TableHeader}" />
+                <Style TargetType="DataGridCell" BasedOn="{StaticResource TableCell}" />
+            </Style.Resources>
+            <Setter Property="IsReadOnly" Value="True" /><Setter Property="AutoGenerateColumns" Value="False" />
+            <Setter Property="CanUserAddRows" Value="False" /><Setter Property="CanUserDeleteRows" Value="False" />
+            <Setter Property="SelectionMode" Value="Single" /><Setter Property="SelectionUnit" Value="FullRow" />
+            <Setter Property="RowHeight" Value="30" /><Setter Property="ColumnHeaderHeight" Value="32" />
+            <Setter Property="GridLinesVisibility" Value="None" /><Setter Property="BorderThickness" Value="0" />
+            <Setter Property="AlternatingRowBackground" Value="{DynamicResource Ts.Canvas}" />
+        </Style>
+    </Window.Resources>
+    <Border Style="{StaticResource Ts.PanelBorder}" Background="{DynamicResource Ts.Canvas}">
+        <Grid>
+            <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="112" /></Grid.RowDefinitions>
+            <Grid Style="{StaticResource WindowHeader}">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <Image Style="{StaticResource WindowHeaderIcon}" />
+                <Grid Grid.Column="1">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <Button x:Name="BotStartButton" Style="{StaticResource HeaderIconButton}" Click="Start_Click" IsEnabled="{Binding CanStart}"
+                            ToolTip="{loc:Translate StartBot}" AutomationProperties.Name="{loc:Translate StartBot}">
+                        <icons:SvgIcon Kind="Play" Width="16" Height="16" />
+                    </Button>
+                    <Button x:Name="BotStopButton" Grid.Column="1" Style="{StaticResource HeaderIconButton}" Click="Stop_Click" IsEnabled="{Binding CanStop}"
+                            ToolTip="{loc:Translate StopBot}" AutomationProperties.Name="{loc:Translate StopBot}">
+                        <icons:SvgIcon Kind="Stop" Width="16" Height="16" Foreground="{StaticResource BotDisconnectedBrush}" />
+                    </Button>
+                    <Ellipse x:Name="BotStatusDot" Grid.Column="2" Width="6" Height="6" Margin="12,0,8,0" VerticalAlignment="Center"
+                             ToolTip="{Binding Status}" AutomationProperties.Name="{Binding Status}" shell:WindowChrome.IsHitTestVisibleInChrome="True">
+                        <Ellipse.Style>
+                            <Style TargetType="Ellipse">
+                                <Setter Property="Fill" Value="{StaticResource BotDisconnectedBrush}" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding ConnectionState}" Value="{x:Static vm:BotConnectionState.Connecting}">
+                                        <Setter Property="Fill" Value="{StaticResource BotConnectingBrush}" />
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding ConnectionState}" Value="{x:Static vm:BotConnectionState.Connected}">
+                                        <Setter Property="Fill" Value="{StaticResource BotConnectedBrush}" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Ellipse.Style>
+                    </Ellipse>
+                </Grid>
+                <tessera:CarouselLoader x:Name="OperationLoader" Grid.Column="2" Style="{StaticResource WorkLoader}"
+                                       Margin="16,0,0,0" Visibility="{Binding IsWaiting, Converter={StaticResource Visible}}"
+                                       AutomationProperties.Name="{loc:Translate Working}" />
+                <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,8,0">
+                    <icons:SvgIcon Kind="Channel" Width="16" Height="16" Margin="0,0,6,0"
+                                   Visibility="{Binding HasServer, Converter={StaticResource Visible}}" />
+                    <ComboBox x:Name="VoiceChannelBox" ItemsSource="{Binding Channels}" SelectedItem="{Binding SelectedChannel}"
+                              Width="190" Height="32" MinHeight="28" Padding="6,3" IsEnabled="{Binding GuildEnabled}"
+                              Visibility="{Binding HasServer, Converter={StaticResource Visible}}"
+                              ToolTip="{loc:Translate VoiceChannel}" AutomationProperties.Name="{loc:Translate VoiceChannel}"
+                              shell:WindowChrome.IsHitTestVisibleInChrome="True">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate><TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" /></DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+                </StackPanel>
+                <StackPanel Grid.Column="4" Orientation="Horizontal">
+                    <Button Style="{StaticResource CaptionButton}" Click="Settings_Click" ToolTip="{loc:Translate Settings}" AutomationProperties.Name="{loc:Translate Settings}"><icons:SvgIcon Kind="Settings" Width="18" Height="18" /></Button>
+                    <Button Style="{StaticResource CaptionButton}" Click="Minimize_Click" ToolTip="{loc:Translate Minimize}" AutomationProperties.Name="{loc:Translate Minimize}"><icons:SvgIcon Kind="Minimize" Width="15" Height="15" /></Button>
+                    <Button Style="{StaticResource CaptionButton}" Click="Maximize_Click" ToolTip="{loc:Translate MaximizeRestore}" AutomationProperties.Name="{loc:Translate MaximizeOrRestore}"><icons:SvgIcon Kind="Maximize" Width="15" Height="15" /></Button>
+                    <Button Style="{StaticResource CloseCaptionButton}" Click="Close_Click" ToolTip="{loc:Translate Close}" AutomationProperties.Name="{loc:Translate Close}"><icons:SvgIcon Kind="Close" Width="17" Height="17" /></Button>
+                </StackPanel>
+            </Grid>
+            <Border Grid.Row="1" Style="{StaticResource Ts.PanelBorder}" BorderThickness="0,0,0,1" MinHeight="30">
+                <StackPanel>
+                <DockPanel>
+                    <Button DockPanel.Dock="Right" Click="AddServer_Click" IsEnabled="{Binding CanSelect}"
+                            Style="{StaticResource IconButton}" Width="28" Height="28" Padding="5" VerticalAlignment="Top"
+                            Margin="6,0,10,0" ToolTip="{loc:Translate OpenServer}" AutomationProperties.Name="{loc:Translate OpenServer}">
+                        <icons:SvgIcon Kind="Plus" Width="16" Height="16" />
+                    </Button>
+                    <TabControl x:Name="ServerTabs" ItemsSource="{Binding OpenServers}" SelectedItem="{Binding SelectedTab, Mode=TwoWay}"
+                                Style="{StaticResource Ts.UnderlineTabs}" ItemContainerStyle="{StaticResource ServerTab}"
+                                AutomationProperties.Name="{loc:Translate OpenServers}">
+                        <TabControl.Template>
+                            <ControlTemplate TargetType="TabControl">
+                                <ScrollViewer Style="{StaticResource Ts.GutterScrollViewer}" Background="Transparent"
+                                              HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+                                    <ItemsPresenter KeyboardNavigation.TabNavigation="Once" />
+                                </ScrollViewer>
+                            </ControlTemplate>
+                        </TabControl.Template>
+                        <TabControl.ItemsPanel>
+                            <ItemsPanelTemplate><StackPanel Orientation="Horizontal" /></ItemsPanelTemplate>
+                        </TabControl.ItemsPanel>
+                        <TabControl.ItemTemplate>
+                            <DataTemplate>
+                                <DockPanel>
+                                    <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" Width="26" Height="24" Padding="5"
+                                            Click="CloseServer_Click" ToolTip="{loc:Translate CloseTabKeepsMusicPlaying}"
+                                            AutomationProperties.Name="{loc:Translate CloseServerTab}">
+                                        <icons:SvgIcon Kind="Close" Width="14" Height="14" />
+                                    </Button>
+                                    <TextBlock Text="{Binding Name}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"
+                                               VerticalAlignment="Center" Margin="0,0,12,0" ToolTip="{Binding Name}" />
+                                </DockPanel>
+                            </DataTemplate>
+                        </TabControl.ItemTemplate>
+                    </TabControl>
+                </DockPanel>
+                <Grid Margin="12,2,12,5" Visibility="{Binding HasMediaStatus, Converter={StaticResource Visible}}">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                    <TextBlock Text="{Binding MediaText}" TextTrimming="CharacterEllipsis" ToolTip="{Binding MediaDetails}"
+                               AutomationProperties.HelpText="{Binding MediaDetails}" VerticalAlignment="Center" />
+                    <ProgressBar x:Name="MediaProgressBar" Grid.Column="1" Width="100" Height="5" Margin="10,0,0,0" VerticalAlignment="Center"
+                                 Minimum="0" Maximum="100" Value="{Binding MediaPercent, Mode=OneWay}"
+                                 IsIndeterminate="{Binding MediaIndeterminate}" Visibility="{Binding MediaWorking, Converter={StaticResource Visible}}"
+                                 AutomationProperties.Name="{Binding MediaText}" />
+                </Grid>
+                </StackPanel>
+            </Border>
+            <Grid Grid.Row="2">
+                <Grid.Style><Style TargetType="Grid"><Setter Property="Visibility" Value="Collapsed" /><Style.Triggers><DataTrigger Binding="{Binding HasServer}" Value="True"><Setter Property="Visibility" Value="Visible" /></DataTrigger></Style.Triggers></Style></Grid.Style>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                <Border x:Name="NavigationPane" BorderBrush="{DynamicResource Ts.Border}" BorderThickness="0,0,1,0" Padding="4,8,4,8">
+                    <Border.Style>
+                        <Style TargetType="Border">
+                            <Setter Property="Width" Value="132" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsChecked, ElementName=NavigationToggle}" Value="True">
+                                    <Setter Property="Width" Value="52" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Style>
+                    <DockPanel>
+                        <ToggleButton x:Name="NavigationToggle" DockPanel.Dock="Top" Width="36" Height="34" MinHeight="34"
+                                      Padding="8,6" Margin="0,0,0,6" Background="Transparent" BorderBrush="Transparent">
+                            <ToggleButton.Style>
+                                <Style TargetType="ToggleButton" BasedOn="{StaticResource {x:Type ToggleButton}}">
+                                    <Setter Property="HorizontalAlignment" Value="Left" />
+                                    <Setter Property="ToolTip" Value="{loc:Translate CollapseSections}" />
+                                    <Setter Property="AutomationProperties.Name" Value="{Binding ToolTip, RelativeSource={RelativeSource Self}}" />
+                                    <Style.Triggers>
+                                        <Trigger Property="IsChecked" Value="True">
+                                            <Setter Property="HorizontalAlignment" Value="Center" />
+                                            <Setter Property="ToolTip" Value="{loc:Translate ExpandSections}" />
+                                        </Trigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </ToggleButton.Style>
+                            <icons:SvgIcon Kind="Up" Width="18" Height="18" RenderTransformOrigin="0.5,0.5">
+                                <icons:SvgIcon.Style>
+                                    <Style TargetType="icons:SvgIcon">
+                                        <Setter Property="RenderTransform"><Setter.Value><RotateTransform Angle="-90" /></Setter.Value></Setter>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsChecked, ElementName=NavigationToggle}" Value="True">
+                                                <Setter Property="RenderTransform"><Setter.Value><RotateTransform Angle="90" /></Setter.Value></Setter>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </icons:SvgIcon.Style>
+                            </icons:SvgIcon>
+                        </ToggleButton>
+                        <ListBox x:Name="NavigationList" SelectedIndex="{Binding ViewIndex}" BorderThickness="0" Background="Transparent"
+                                 ItemContainerStyle="{StaticResource NavItem}" ScrollViewer.HorizontalScrollBarVisibility="Disabled" AutomationProperties.Name="{loc:Translate ServerSection}">
+                            <ListBoxItem AutomationProperties.Name="{loc:Translate Library}"><StackPanel Orientation="Horizontal"><icons:SvgIcon Kind="Library" Width="18" Height="18" /><TextBlock Style="{StaticResource NavLabel}" Text="{loc:Translate Library}" /></StackPanel></ListBoxItem>
+                            <ListBoxItem AutomationProperties.Name="{loc:Translate ServerRulesTab}"><StackPanel Orientation="Horizontal"><icons:SvgIcon Kind="Users" Width="18" Height="18" /><TextBlock Style="{StaticResource NavLabel}" Text="{loc:Translate ServerRulesTab}" /></StackPanel></ListBoxItem>
+                            <ListBoxItem AutomationProperties.Name="{loc:Translate Maintenance}"><StackPanel Orientation="Horizontal"><icons:SvgIcon Kind="Tool" Width="18" Height="18" /><TextBlock Style="{StaticResource NavLabel}" Text="{loc:Translate Service}" /></StackPanel></ListBoxItem>
+                            <ListBoxItem AutomationProperties.Name="{loc:Translate Soundboard}"><StackPanel Orientation="Horizontal"><icons:SvgIcon Kind="Soundboard" Width="18" Height="18" /><TextBlock Style="{StaticResource NavLabel}" Text="{loc:Translate Soundboard}" /></StackPanel></ListBoxItem>
+                        </ListBox>
+                    </DockPanel>
+                </Border>
+                <controls:WorkspaceContent Grid.Column="1" SelectedIndex="{Binding ViewIndex}" BorderThickness="0" Background="Transparent" Padding="0" AutomationProperties.Name="{loc:Translate SectionContent}">
+                    <TabControl.Template><ControlTemplate TargetType="TabControl"><ContentPresenter ContentSource="SelectedContent" /></ControlTemplate></TabControl.Template>
+                    <TabItem>
+                        <Grid Margin="26,22,26,18" IsEnabled="{Binding GuildEnabled}">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" MinWidth="148" MaxWidth="235" /><ColumnDefinition Width="20" /><ColumnDefinition Width="2*" /></Grid.ColumnDefinitions>
+                            <Grid>
+                                <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                                <Grid Margin="0,0,0,8">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                    <TextBox Height="28" MinHeight="0" Padding="8,3" Text="{Binding Search, UpdateSourceTrigger=PropertyChanged}"
+                                             ToolTip="{loc:Translate SearchPlaylists}" AutomationProperties.Name="{loc:Translate SearchPlaylists}" />
+                                    <Button Grid.Column="1" Width="28" Height="28" MinHeight="0" Padding="0" Margin="6,0,0,0"
+                                            Style="{StaticResource Ts.PrimaryButton}" HorizontalContentAlignment="Center" Click="CreatePlaylist_Click"
+                                            ToolTip="{loc:Translate NewPlaylist}" AutomationProperties.Name="{loc:Translate NewPlaylist}">
+                                        <icons:SvgIcon Kind="Plus" Width="16" Height="16" />
+                                    </Button>
+                                </Grid>
+                                <ListBox Grid.Row="1" ItemsSource="{Binding FilteredPlaylists}" SelectedItem="{Binding SelectedPlaylist}"
+                                         AllowDrop="True" PreviewDragEnter="PlaylistDrag_Over" PreviewDragOver="PlaylistDrag_Over"
+                                         PreviewDragLeave="PlaylistDrag_Leave" PreviewDrop="PlaylistDrag_Drop"
+                                         ItemContainerStyle="{StaticResource PlaylistItem}" AutomationProperties.Name="{loc:Translate Playlists}">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid>
+                                                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                                <TextBlock Text="{Binding Name}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"
+                                                           VerticalAlignment="Center" Margin="0,0,8,0" />
+                                                <TextBlock Grid.Column="1" Text="{Binding Count}" Foreground="{DynamicResource Ts.TextSecondary}"
+                                                           FontSize="12" VerticalAlignment="Center"
+                                                           AutomationProperties.Name="{Binding Count, StringFormat={loc:Translate PlaylistTrackCountFormat}}" />
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                            </Grid>
+                            <Grid Grid.Column="2">
+                                <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                                <DockPanel Margin="0,0,0,12">
+                                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                                        <Button Style="{StaticResource IconButton}" Command="{Binding ActionCommand}" CommandParameter="playlist-play" ToolTip="{loc:Translate QueueWholePlaylist}" AutomationProperties.Name="{loc:Translate QueueWholePlaylist}"><icons:SvgIcon Kind="Play" /></Button>
+                                        <Button Style="{StaticResource IconButton}" Command="{Binding ActionCommand}" CommandParameter="playlist-add-current" ToolTip="{loc:Translate SaveCurrentTrack}" AutomationProperties.Name="{loc:Translate SaveCurrentTrack}"><icons:SvgIcon Kind="Save" /></Button>
+                                        <Button Style="{StaticResource IconButton}" Click="PlaylistMenu_Click" ToolTip="{loc:Translate PlaylistActions}" AutomationProperties.Name="{loc:Translate PlaylistActions}"><icons:SvgIcon Kind="More" /></Button>
+                                    </StackPanel>
+                                    <TextBlock Text="{Binding SelectedPlaylist.Name, TargetNullValue={loc:Translate ChoosePlaylist}}" FontSize="20" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                </DockPanel>
+                                <DataGrid x:Name="PlaylistTrackGrid" Grid.Row="1" ItemsSource="{Binding Songs}" SelectedItem="{Binding SelectedSong}"
+                                          Style="{StaticResource TrackGrid}" MouseDoubleClick="Playlist_DoubleClick"
+                                          PreviewMouseLeftButtonDown="PlaylistDrag_Start" PreviewMouseMove="PlaylistDrag_Move"
+                                          PreviewMouseLeftButtonUp="PlaylistDrag_Release" AllowDrop="True"
+                                          PreviewDragEnter="PlaylistDrag_Over" PreviewDragOver="PlaylistDrag_Over"
+                                          PreviewDragLeave="PlaylistDrag_Leave" PreviewDrop="PlaylistDrag_Drop"
+                                          AutomationProperties.Name="{loc:Translate PlaylistTracks}" AutomationProperties.HelpText="{loc:Translate PlaylistDragHint}">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="{loc:Translate Track}" Binding="{Binding Name}" Width="2*" MinWidth="92" ElementStyle="{StaticResource TableTitle}" />
+                                        <DataGridTemplateColumn Header="{loc:Translate Artist}" SortMemberPath="Author" Width="*" MinWidth="96" MaxWidth="150"
+                                                                HeaderStyle="{StaticResource CompactTableHeader}">
+                                            <DataGridTemplateColumn.CellTemplate>
+                                                <DataTemplate>
+                                                    <DockPanel>
+                                                        <ContentControl DockPanel.Dock="Right" Style="{StaticResource TrackDownloadIndicator}" />
+                                                        <TextBlock Text="{Binding Author}" Style="{StaticResource TableText}" Margin="3,0,9,0" />
+                                                    </DockPanel>
+                                                </DataTemplate>
+                                            </DataGridTemplateColumn.CellTemplate>
+                                        </DataGridTemplateColumn>
+                                        <DataGridTextColumn Header="{loc:Translate Duration}" Binding="{Binding Duration, Converter={StaticResource Duration}}" Width="SizeToHeader" MinWidth="76"
+                                                            HeaderStyle="{StaticResource DurationHeader}" ElementStyle="{StaticResource TableDuration}" />
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                                <StackPanel Grid.Row="2" Margin="0,12,0,0">
+                                    <StackPanel.Style>
+                                        <Style TargetType="StackPanel">
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding ImportText}" Value=""><Setter Property="Visibility" Value="Collapsed" /></DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </StackPanel.Style>
+                                    <tessera:CarouselLoader x:Name="PlaylistImportLoader" Style="{StaticResource WorkLoader}" Margin="0,0,0,6"
+                                                           Visibility="{Binding ImportIndeterminate, Converter={StaticResource Visible}}"
+                                                           AutomationProperties.Name="{loc:Translate FindingImportTracks}" />
+                                    <TextBox Text="{Binding ImportText, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap"
+                                             MinHeight="0" MaxHeight="80" Background="Transparent" Padding="0" BorderThickness="0" VerticalScrollBarVisibility="Auto"
+                                             AutomationProperties.Name="{loc:Translate PlaylistImportReport}" AutomationProperties.LiveSetting="Polite" />
+                                </StackPanel>
+                            </Grid>
+                        </Grid>
+                    </TabItem>
+                    <TabItem>
+                        <ScrollViewer Style="{StaticResource Ts.GutterScrollViewer}" VerticalScrollBarVisibility="Auto"><StackPanel Margin="30,24" MaxWidth="580" HorizontalAlignment="Left" IsEnabled="{Binding GuildEnabled}">
+                            <CheckBox Style="{StaticResource Ts.CompactSwitchBox}" Content="{loc:Translate VoteToSkip}" IsChecked="{Binding VoteSkip}" Margin="0,0,0,18" /><CheckBox Style="{StaticResource Ts.CompactSwitchBox}" Content="{loc:Translate FairQueue}" IsChecked="{Binding FairQueue}" Margin="0,0,0,24" />
+                            <TextBlock Text="{loc:Translate TracksPerMember}" Style="{StaticResource FieldLabel}" /><TextBox Text="{Binding Limit, UpdateSourceTrigger=PropertyChanged}" Width="140" HorizontalAlignment="Left" AutomationProperties.Name="{loc:Translate TrackLimitPerMember}" />
+                            <Expander Header="{loc:Translate DjRole}" Margin="0,22,0,0"><StackPanel Margin="0,10,0,0"><TextBlock Text="{loc:Translate DjRoleHint}" Style="{StaticResource Ts.Hint}" /><TextBox Text="{Binding DjRole, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="{loc:Translate DjRole}" /></StackPanel></Expander>
+                            <Button Content="{loc:Translate SaveRules}" Command="{Binding ActionCommand}" CommandParameter="settings" Style="{StaticResource Ts.PrimaryButton}" HorizontalAlignment="Left" Margin="0,24,0,0" />
+                        </StackPanel></ScrollViewer>
+                    </TabItem>
+                    <TabItem>
+                        <Grid Margin="26,22,26,18"><Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,16" IsEnabled="{Binding CanSelect}"><Button Content="{loc:Translate RunChecks}" Command="{Binding ActionCommand}" CommandParameter="diagnostics" /><Button Content="{loc:Translate ClearCache}" Command="{Binding ActionCommand}" CommandParameter="cache-clean" Margin="8,0" /><Button Content="{loc:Translate Repair}" Command="{Binding ActionCommand}" CommandParameter="cache-repair" /></StackPanel>
+                            <DataGrid Grid.Row="1" ItemsSource="{Binding Checks}" Style="{StaticResource TrackGrid}" AutomationProperties.Name="{loc:Translate DiagnosticResults}">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="{loc:Translate Check}" Binding="{Binding Name}" Width="180" ElementStyle="{StaticResource TableTitle}" />
+                                    <DataGridCheckBoxColumn Header="{loc:Translate Done}" Binding="{Binding Healthy}" Width="65">
+                                        <DataGridCheckBoxColumn.ElementStyle>
+                                            <Style TargetType="CheckBox" BasedOn="{x:Static DataGridCheckBoxColumn.DefaultElementStyle}">
+                                                <Setter Property="VerticalAlignment" Value="Center" />
+                                                <Setter Property="Template">
+                                                    <Setter.Value>
+                                                        <ControlTemplate TargetType="CheckBox">
+                                                            <Border Width="16" Height="16" BorderThickness="1" BorderBrush="{DynamicResource Ts.BorderStrong}"
+                                                                    Background="{DynamicResource Ts.Canvas}">
+                                                                <Path x:Name="CheckMark" Data="M 1,5 L 4,8 L 10,2" Stroke="{DynamicResource Ts.Text}"
+                                                                      StrokeThickness="1.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                                                                      HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed" />
+                                                            </Border>
+                                                            <ControlTemplate.Triggers>
+                                                                <Trigger Property="IsChecked" Value="True">
+                                                                    <Setter TargetName="CheckMark" Property="Visibility" Value="Visible" />
+                                                                </Trigger>
+                                                            </ControlTemplate.Triggers>
+                                                        </ControlTemplate>
+                                                    </Setter.Value>
+                                                </Setter>
+                                            </Style>
+                                        </DataGridCheckBoxColumn.ElementStyle>
+                                    </DataGridCheckBoxColumn>
+                                    <DataGridTextColumn Header="{loc:Translate Result}" Binding="{Binding Detail}" Width="*" ElementStyle="{StaticResource TableDetail}" />
+                                </DataGrid.Columns>
+                            </DataGrid>
+                            <TextBlock Grid.Row="2" Text="{Binding CacheText}" Foreground="{DynamicResource Ts.TextSecondary}" TextWrapping="Wrap" Margin="0,14,0,0" />
+                        </Grid>
+                    </TabItem>
+                    <TabItem>
+                        <Grid x:Name="SoundboardDropArea" Margin="26,22,26,18" Background="Transparent" AllowDrop="True"
+                              PreviewDragEnter="Soundboard_DragOver" PreviewDragOver="Soundboard_DragOver"
+                              PreviewDragLeave="Soundboard_DragLeave" PreviewDrop="Soundboard_Drop">
+                            <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                            <DockPanel Margin="0,0,0,18">
+                                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="8,0,0,0">
+                                    <Button Style="{StaticResource Ts.CompactButton}" Click="OpenSoundboard_Click" Content="{loc:Translate OpenSoundboardWidget}"
+                                            AutomationProperties.Name="{loc:Translate OpenSoundboardWidget}" />
+                                    <Button Style="{StaticResource IconButton}" Click="ImportEffect_Click" IsEnabled="{Binding GuildEnabled}" ToolTip="{loc:Translate AddAudioFileLimit}" AutomationProperties.Name="{loc:Translate AddEffect}"><icons:SvgIcon Kind="Plus" /></Button>
+                                    <Button Style="{StaticResource IconButton}" Command="{Binding SoundboardCommand}" CommandParameter="sound-stop" ToolTip="{loc:Translate StopEffectsKeepsMusicPlaying}" AutomationProperties.Name="{loc:Translate StopEffects}"><icons:SvgIcon Kind="Stop" /></Button>
+                                </StackPanel>
+                                <TextBlock Text="{loc:Translate SoundboardDropHint}" VerticalAlignment="Center" TextWrapping="Wrap"
+                                           Foreground="{DynamicResource Ts.TextSecondary}" />
+                            </DockPanel>
+                            <Border Grid.Row="1" Style="{StaticResource Ts.PanelBorder}" Padding="16" Margin="0,0,0,18"
+                                    IsEnabled="{Binding SoundboardEnabled}">
+                                <WrapPanel VerticalAlignment="Center">
+                                    <StackPanel Width="210" Margin="0,0,24,12"><TextBlock Text="{loc:Translate Music}" Style="{StaticResource FieldLabel}" /><DockPanel><TextBlock DockPanel.Dock="Right" Text="{Binding Volume, StringFormat={}{0:F0}%}" Width="44" TextAlignment="Right" /><Slider Value="{Binding Volume}" Minimum="0" Maximum="100" PreviewMouseLeftButtonDown="PlayerEdit_Start" PreviewKeyDown="PlayerEdit_KeyDown" LostMouseCapture="PlayerEdit_LostCapture" PreviewMouseLeftButtonUp="SoundboardMusicVolume_Changed" PreviewKeyUp="SoundboardMusicVolume_KeyUp" AutomationProperties.Name="{loc:Translate MusicVolume}" /></DockPanel></StackPanel>
+                                    <StackPanel Width="210" Margin="0,0,24,12"><TextBlock Text="{loc:Translate Effects}" Style="{StaticResource FieldLabel}" /><DockPanel><TextBlock DockPanel.Dock="Right" Text="{Binding EffectsVolume, StringFormat={}{0:F0}%}" Width="44" TextAlignment="Right" /><Slider Value="{Binding EffectsVolume}" Minimum="0" Maximum="100" PreviewMouseLeftButtonDown="EffectsEdit_Start" PreviewKeyDown="EffectsEdit_KeyDown" LostMouseCapture="EffectsEdit_LostCapture" PreviewMouseLeftButtonUp="EffectsVolume_Changed" PreviewKeyUp="EffectsVolume_KeyUp" AutomationProperties.Name="{loc:Translate EffectsVolume}" /></DockPanel></StackPanel>
+                                    <CheckBox Style="{StaticResource Ts.CompactSwitchBox}" Content="{loc:Translate DuckMusic}" IsChecked="{Binding DuckMusic}" Click="DuckMusic_Click" VerticalAlignment="Center" Margin="0,0,0,12" ToolTip="{loc:Translate DuckMusicHint}" AutomationProperties.Name="{loc:Translate DuckMusicDuringEffects}" />
+                                </WrapPanel>
+                            </Border>
+                            <Grid Grid.Row="2">
+                                <ScrollViewer Style="{StaticResource Ts.GutterScrollViewer}" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                                    <ItemsControl ItemsSource="{Binding Effects}" AutomationProperties.Name="{loc:Translate SoundboardEffects}">
+                                        <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                                        <ItemsControl.ItemTemplate><DataTemplate>
+                                            <Border Width="210" Margin="0,0,12,12" Style="{StaticResource Ts.PanelBorder}">
+                                                <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="30" /></Grid.ColumnDefinitions>
+                                                    <Button Command="{Binding DataContext.SoundboardCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" IsEnabled="{Binding Ready}" Background="Transparent" BorderThickness="0" Padding="14" HorizontalContentAlignment="Stretch" AutomationProperties.Name="{Binding Name}" ToolTip="{Binding Problem}">
+                                                        <StackPanel><icons:SvgIcon Kind="Play" Width="23" Height="23" HorizontalAlignment="Left" Margin="0,0,0,12" /><TextBlock Text="{Binding Name}" Style="{StaticResource Ts.CardTitleText}" /><TextBlock Text="{Binding Duration, StringFormat={loc:Translate EffectDurationFormat}}" Foreground="{DynamicResource Ts.TextSecondary}" Margin="0,5,0,0" /></StackPanel>
+                                                    </Button>
+                                                    <Button Grid.Column="1" VerticalAlignment="Top" Style="{StaticResource IconButton}" Width="28" Height="30" Padding="6" Click="RemoveEffect_Click"
+                                                            IsEnabled="{Binding DataContext.GuildEnabled, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                            ToolTip="{loc:Translate RemoveFromSoundboard}" AutomationProperties.Name="{loc:Translate DeleteEffect}"><icons:SvgIcon Kind="Close" Width="12" Height="12" /></Button>
+                                                </Grid>
+                                            </Border>
+                                        </DataTemplate></ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </ScrollViewer>
+                            </Grid>
+                            <Grid Grid.Row="3" Margin="0,12,0,0">
+                                <TextBlock Text="{Binding SoundboardStatus}" Foreground="{DynamicResource Ts.TextSecondary}" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsImportingEffects}" Value="True"><Setter Property="Visibility" Value="Collapsed" /></DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                                <StackPanel Visibility="{Binding IsImportingEffects, Converter={StaticResource Visible}}">
+                                    <TextBlock Text="{Binding EffectImportProgressText}" Foreground="{DynamicResource Ts.TextSecondary}" Margin="0,0,0,5" />
+                                    <ProgressBar Minimum="0" Maximum="{Binding EffectImportTotal}" Value="{Binding EffectsProcessed, Mode=OneWay}"
+                                                 Height="5" AutomationProperties.Name="{loc:Translate PreparingEffect}" />
+                                </StackPanel>
+                            </Grid>
+                            <Border x:Name="EffectDropHighlight" Grid.RowSpan="4" BorderBrush="{DynamicResource Ts.Accent}" BorderThickness="2"
+                                    CornerRadius="6" Visibility="Collapsed" IsHitTestVisible="False" />
+                        </Grid>
+                    </TabItem>
+                </controls:WorkspaceContent>
+                <Border x:Name="PlaybackPanel" Grid.Column="2" Width="328" Margin="0,8,8,8" Padding="12,8,12,12"
+                        Style="{StaticResource Ts.PanelBorder}" Background="{DynamicResource Ts.Raised}" CornerRadius="6"
+                        Visibility="{Binding IsChecked, ElementName=PlaybackPanelButton, Converter={StaticResource Visible}}">
+                    <Grid>
+                        <TabControl x:Name="PlaybackPanelTabs" SelectedIndex="0" Style="{StaticResource Ts.UnderlineTabs}"
+                                    Background="Transparent" AutomationProperties.Name="{loc:Translate PlaybackPanel}">
+                            <TabControl.ItemContainerStyle>
+                                <Style TargetType="TabItem" BasedOn="{StaticResource Ts.UnderlineTabItem}">
+                                    <Setter Property="Background" Value="Transparent" />
+                                </Style>
+                            </TabControl.ItemContainerStyle>
+                            <TabControl.Template>
+                                <ControlTemplate TargetType="TabControl">
+                                    <Grid KeyboardNavigation.TabNavigation="Local">
+                                        <Grid.RowDefinitions><RowDefinition Height="40" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                                        <TabPanel IsItemsHost="True" HorizontalAlignment="Left" />
+                                        <ContentPresenter Grid.Row="1" ContentSource="SelectedContent" Margin="0,10,0,0" />
+                                    </Grid>
+                                </ControlTemplate>
+                            </TabControl.Template>
+                            <TabItem Header="{loc:Translate Queue}">
+                                <Grid>
+                                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                                    <DockPanel Margin="0,0,0,10" IsEnabled="{Binding GuildEnabled}">
+                                        <Button DockPanel.Dock="Right" Width="36" Padding="6" Margin="6,0,0,0" Style="{StaticResource Ts.PrimaryButton}"
+                                                HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                                                Command="{Binding ActionCommand}" CommandParameter="enqueue" ToolTip="{loc:Translate AddToQueueShortcut}"
+                                                AutomationProperties.Name="{loc:Translate AddToQueue}">
+                                            <icons:SvgIcon Kind="Plus" Width="16" Height="16" />
+                                        </Button>
+                                        <Grid>
+                                            <TextBox x:Name="QueueQueryBox" Style="{StaticResource Ts.TextInput}" Height="{Binding MinHeight, RelativeSource={RelativeSource Self}}"
+                                                     Padding="8,3"
+                                                     Text="{Binding Query, UpdateSourceTrigger=PropertyChanged}" KeyDown="Query_KeyDown"
+                                                     AutomationProperties.Name="{loc:Translate TrackNameOrLink}" />
+                                            <TextBlock Text="{loc:Translate TrackNameOrLink}" Foreground="{DynamicResource Ts.TextMuted}"
+                                                       Margin="8,0" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" IsHitTestVisible="False">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Setter Property="Visibility" Value="Collapsed" />
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding Text, ElementName=QueueQueryBox}" Value=""><Setter Property="Visibility" Value="Visible" /></DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
+                                        </Grid>
+                                    </DockPanel>
+                                    <ListBox Grid.Row="1" ItemsSource="{Binding Queue}" SelectedItem="{Binding SelectedEntry}"
+                                             Style="{StaticResource PlaybackPanelList}" AutomationProperties.Name="{loc:Translate ServerQueue}">
+                                        <ListBox.ItemContainerStyle>
+                                            <Style TargetType="ListBoxItem" BasedOn="{StaticResource PlaybackPanelTrackItem}">
+                                                <EventSetter Event="ContextMenuOpening" Handler="QueueMenu_Opening" />
+                                                <Setter Property="ContextMenu">
+                                                    <Setter.Value><ContextMenu Style="{StaticResource Ts.ContextMenu}" /></Setter.Value>
+                                                </Setter>
+                                            </Style>
+                                        </ListBox.ItemContainerStyle>
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <ContentPresenter Content="{Binding Track}" ContentTemplate="{StaticResource PlaybackPanelTrack}" />
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+                                    <StackPanel Grid.Row="1" VerticalAlignment="Center" IsHitTestVisible="False" Margin="12">
+                                        <StackPanel.Style>
+                                            <Style TargetType="StackPanel">
+                                                <Setter Property="Visibility" Value="Collapsed" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding Queue.Length}" Value="0"><Setter Property="Visibility" Value="Visible" /></DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </StackPanel.Style>
+                                        <TextBlock Text="{loc:Translate QueuePrompt}" FontSize="16" TextAlignment="Center" />
+                                        <TextBlock Text="{loc:Translate EmptyQueueHint}" Foreground="{DynamicResource Ts.TextSecondary}"
+                                                   TextAlignment="Center" TextWrapping="Wrap" Margin="0,6,0,0" />
+                                    </StackPanel>
+                                </Grid>
+                            </TabItem>
+                            <TabItem Header="{loc:Translate RecentlyPlayed}">
+                                <Grid>
+                                    <ListBox ItemsSource="{Binding History}" SelectedItem="{Binding SelectedHistory}"
+                                             Style="{StaticResource PlaybackPanelList}" ItemTemplate="{StaticResource PlaybackPanelTrack}"
+                                             MouseDoubleClick="History_DoubleClick" AutomationProperties.Name="{loc:Translate ServerHistory}" />
+                                    <TextBlock Text="{loc:Translate EmptyHistoryHint}" Foreground="{DynamicResource Ts.TextSecondary}"
+                                               VerticalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap" Margin="12" IsHitTestVisible="False">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="Visibility" Value="Collapsed" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding History.Length}" Value="0"><Setter Property="Visibility" Value="Visible" /></DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                </Grid>
+                            </TabItem>
+                        </TabControl>
+                    </Grid>
+                </Border>
+            </Grid>
+            <StackPanel Grid.Row="2" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="480">
+                <StackPanel.Style><Style TargetType="StackPanel"><Setter Property="Visibility" Value="Visible" /><Style.Triggers><DataTrigger Binding="{Binding HasServer}" Value="True"><Setter Property="Visibility" Value="Collapsed" /></DataTrigger></Style.Triggers></Style></StackPanel.Style>
+                <icons:SvgIcon Kind="Music" Width="46" Height="46" HorizontalAlignment="Center" Foreground="{DynamicResource Ts.TextMuted}" Margin="0,0,0,22" /><TextBlock Text="{Binding WelcomeTitle}" Style="{StaticResource Ts.SectionText}" TextAlignment="Center" TextWrapping="Wrap" />
+                <TextBlock Text="{Binding WelcomeDetail}" Foreground="{DynamicResource Ts.TextSecondary}" TextWrapping="Wrap" TextAlignment="Center" Margin="0,12,0,0" />
+            </StackPanel>
+            <Border Grid.Row="3" Style="{StaticResource Ts.PanelBorder}" BorderThickness="0,1,0,0" Padding="22,12">
+                <Grid><Grid.RowDefinitions><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                    <DockPanel VerticalAlignment="Center" Margin="0,0,20,0">
+                        <Grid DockPanel.Dock="Left" Width="40" Height="40" Margin="0,0,12,0" IsHitTestVisible="False"
+                              Visibility="{Binding HasCurrentCoverSource, Converter={StaticResource Visible}}">
+                            <Border Background="{DynamicResource Ts.Raised}" CornerRadius="4" />
+                            <icons:SvgIcon Kind="Music" Width="18" Height="18" Foreground="{DynamicResource Ts.TextMuted}">
+                                <icons:SvgIcon.Style>
+                                    <Style TargetType="icons:SvgIcon">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                        <Style.Triggers>
+                                            <MultiDataTrigger>
+                                                <MultiDataTrigger.Conditions>
+                                                    <Condition Binding="{Binding CurrentCover}" Value="{x:Null}" />
+                                                    <Condition Binding="{Binding IsCurrentCoverLoading}" Value="False" />
+                                                </MultiDataTrigger.Conditions>
+                                                <Setter Property="Visibility" Value="Visible" />
+                                            </MultiDataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </icons:SvgIcon.Style>
+                            </icons:SvgIcon>
+                            <Rectangle RadiusX="4" RadiusY="4">
+                                <Rectangle.Fill><ImageBrush ImageSource="{Binding CurrentCover}" Stretch="UniformToFill" /></Rectangle.Fill>
+                            </Rectangle>
+                            <tessera:CarouselLoader Style="{StaticResource WorkLoader}" HorizontalAlignment="Center"
+                                                   Visibility="{Binding IsCurrentCoverLoading, Converter={StaticResource Visible}}" />
+                        </Grid>
+                        <StackPanel VerticalAlignment="Center">
+                            <TextBlock Text="{Binding CurrentTitle}" Style="{StaticResource Ts.CardTitleText}" TextTrimming="CharacterEllipsis" />
+                            <TextBlock Text="{Binding CurrentDetail}" Foreground="{DynamicResource Ts.TextSecondary}" TextTrimming="CharacterEllipsis" Margin="0,4,0,0" />
+                        </StackPanel>
+                    </DockPanel>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" IsEnabled="{Binding GuildEnabled}">
+                        <Button x:Name="ShuffleButton" Style="{StaticResource IconButton}" Padding="6" Command="{Binding ActionCommand}" CommandParameter="queue-shuffle"
+                                ToolTip="{loc:Translate ShuffleQueue}" AutomationProperties.Name="{loc:Translate ShuffleQueue}" Margin="0,0,8,0">
+                            <icons:SvgIcon Kind="Shuffle" />
+                        </Button>
+                        <Button Style="{StaticResource IconButton}" Command="{Binding ActionCommand}" CommandParameter="cycle-repeat" ToolTip="{Binding RepeatText}" AutomationProperties.Name="{loc:Translate ToggleRepeat}" Margin="0,0,12,0"><icons:SvgIcon Kind="{Binding RepeatIcon}"><icons:SvgIcon.Style><Style TargetType="icons:SvgIcon"><Setter Property="Opacity" Value="0.4" /><Style.Triggers><DataTrigger Binding="{Binding RepeatEnabled}" Value="True"><Setter Property="Opacity" Value="1" /></DataTrigger></Style.Triggers></Style></icons:SvgIcon.Style></icons:SvgIcon></Button>
+                        <Button Style="{StaticResource PlayPauseButton}" Command="{Binding ActionCommand}" CommandParameter="toggle-play" ToolTip="{Binding PlayHint}" AutomationProperties.Name="{loc:Translate TogglePlayback}"><icons:SvgIcon Kind="{Binding PlayIcon}" Width="24" Height="24" /></Button>
+                        <Button Style="{StaticResource IconButton}" Command="{Binding ActionCommand}" CommandParameter="skip" ToolTip="{loc:Translate NextTrack}" AutomationProperties.Name="{loc:Translate NextTrack}" Margin="8,0,0,0"><icons:SvgIcon Kind="Skip" /></Button>
+                        <Button Style="{StaticResource IconButton}" Click="PlayerMenu_Click" ToolTip="{loc:Translate More}" AutomationProperties.Name="{loc:Translate MorePlayerActions}"><icons:SvgIcon Kind="More" /></Button>
+                    </StackPanel>
+                    <StackPanel Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                        <ToggleButton x:Name="PlaybackPanelButton" Style="{StaticResource PlaybackPanelButtonStyle}" IsEnabled="{Binding HasServer}"
+                                      AutomationProperties.Name="{loc:Translate PlaybackPanel}">
+                            <icons:SvgIcon Kind="Queue" />
+                        </ToggleButton>
+                        <icons:SvgIcon Kind="Volume" Width="18" Height="18" Margin="10,0,10,0" />
+                        <Slider Value="{Binding Volume}" Minimum="0" Maximum="100" Width="100" VerticalAlignment="Center" IsEnabled="{Binding GuildEnabled}"
+                                PreviewMouseLeftButtonDown="PlayerEdit_Start" PreviewKeyDown="PlayerEdit_KeyDown" LostMouseCapture="PlayerEdit_LostCapture"
+                                PreviewMouseLeftButtonUp="Volume_Changed" PreviewKeyUp="Volume_KeyUp"
+                                AutomationProperties.Name="{loc:Translate MusicVolume}" ToolTip="{Binding Volume, StringFormat={loc:Translate MusicVolumeFormat}}" />
+                    </StackPanel>
+                    <DockPanel Grid.Row="1" Grid.ColumnSpan="3" Margin="0,8,0,0">
+                        <DockPanel.Style>
+                            <Style TargetType="DockPanel">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsPreparingPlayback}" Value="True">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </DockPanel.Style>
+                        <TextBlock DockPanel.Dock="Right" Text="{Binding PositionText}" FontSize="12" Foreground="{DynamicResource Ts.TextSecondary}"
+                                   Margin="14,0,0,0" VerticalAlignment="Center" />
+                        <Slider x:Name="PlaybackPositionSlider" Value="{Binding Position}" Minimum="0" Maximum="{Binding Duration}" IsEnabled="{Binding CanSeek}"
+                                PreviewMouseLeftButtonDown="Seek_Start" PreviewMouseLeftButtonUp="Seek_Changed" LostMouseCapture="Seek_Canceled"
+                                PreviewKeyDown="Seek_KeyDown" PreviewKeyUp="Seek_KeyUp" LostKeyboardFocus="Seek_Canceled"
+                                VerticalAlignment="Center" AutomationProperties.Name="{loc:Translate PlaybackPosition}" />
+                    </DockPanel>
+                    <tessera:CarouselLoader x:Name="PlaybackPreparationLoader" Grid.Row="1" Grid.ColumnSpan="3" Margin="0,8,0,0"
+                                           HorizontalAlignment="Center" Style="{StaticResource WorkLoader}"
+                                           Visibility="{Binding IsPreparingPlayback, Converter={StaticResource Visible}}"
+                                           AutomationProperties.Name="{loc:Translate PreparingAudio}" />
+                </Grid>
+            </Border>
+            <tessera:NotificationDisplay x:Name="Notifications" Grid.Row="2"
+                                         Placement="TopRight" DismissText="{loc:Translate DismissNotification}" />
+        </Grid>
+    </Border>
+</Window>

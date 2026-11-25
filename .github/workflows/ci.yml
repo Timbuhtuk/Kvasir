@@ -10,6 +10,7 @@ jobs:
   build:
     name: Build
     runs-on: windows-latest
+    timeout-minutes: 15
 
     steps:
     - name: Checkout code
@@ -24,7 +25,7 @@ jobs:
       uses: actions/cache@v4
       with:
         path: ~/.nuget/packages
-        key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+        key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', 'vendor/nuget/*.nupkg') }}
         restore-keys: |
           ${{ runner.os }}-nuget-
 
@@ -36,4 +37,23 @@ jobs:
       run: ./scripts/check-architecture.ps1
 
     - name: Build solution
-      run: dotnet build Kvasir.sln --configuration Release --no-restore --warnaserror
+      id: build
+      run: dotnet build Kvasir.sln --configuration Release --no-restore --warnaserror -m:1 -p:UseSharedCompilation=false
+
+    - name: Verify music, SQLite migrations, Discord REST and Spotify contracts
+      if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+      run: dotnet run --project tests/Kvasir.Tests/Kvasir.Tests.csproj --configuration Release --no-build
+
+    - name: Verify WPF, Tessera themes and Windows pipes
+      if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+      run: dotnet run --project tests/Kvasir.Desktop.Tests/Kvasir.Desktop.Tests.csproj --configuration Release --no-build
+
+    - name: Install yt-dlp and FFmpeg in the test output
+      if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+      id: media_tools
+      run: ./scripts/install-test-media-tools.ps1 -Destination tests/Kvasir.Tests/bin/Release/net10.0/appdata
+
+    - name: Verify FFmpeg, yt-dlp, Opus and DAVE
+      if: ${{ !cancelled() && steps.media_tools.outcome == 'success' }}
+      timeout-minutes: 3
+      run: dotnet run --project tests/Kvasir.Tests/Kvasir.Tests.csproj --configuration Release --no-build -- --native

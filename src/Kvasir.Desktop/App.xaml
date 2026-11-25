@@ -1,0 +1,44 @@
+<Application x:Class="Kvasir.Desktop.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
+             StartupUri="MainWindow.xaml">
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="pack://application:,,,/Tessera.WpfStyles;component/Themes/TesseraTheme.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+            <FontFamily x:Key="Ts.UiFont">Segoe UI</FontFamily>
+            <shell:WindowChrome x:Key="KvasirWindowChrome" x:Shared="False" CaptionHeight="39" ResizeBorderThickness="6"
+                                GlassFrameThickness="0" CornerRadius="0" UseAeroCaptionButtons="False" />
+            <Style x:Key="WindowHeader" TargetType="Grid">
+                <Setter Property="Height" Value="39" />
+                <Setter Property="Background" Value="{DynamicResource Ts.Raised}" />
+            </Style>
+            <Style x:Key="WindowHeaderIcon" TargetType="Image">
+                <Setter Property="Source" Value="pack://application:,,,/Kvasir.Desktop;component/ds_bot_logo.ico" />
+                <Setter Property="Width" Value="18" />
+                <Setter Property="Height" Value="18" />
+                <Setter Property="Margin" Value="16,0,10,0" />
+            </Style>
+            <Style x:Key="DialogWindow" TargetType="Window" BasedOn="{StaticResource {x:Type Window}}">
+                <Setter Property="Icon" Value="pack://application:,,,/Kvasir.Desktop;component/ds_bot_logo.ico" />
+            </Style>
+            <Style x:Key="FieldLabel" TargetType="TextBlock" BasedOn="{StaticResource Ts.Caption}">
+                <Setter Property="Foreground" Value="{DynamicResource Ts.TextSecondary}" />
+                <Setter Property="Margin" Value="0,0,0,6" />
+                <Setter Property="TextWrapping" Value="Wrap" />
+                <Setter Property="TextTrimming" Value="None" />
+            </Style>
+            <Style x:Key="ActionButton" TargetType="Button" BasedOn="{StaticResource Ts.CompactButton}">
+                <Setter Property="Margin" Value="0,0,8,8" />
+            </Style>
+            <Style x:Key="CaptionButton" TargetType="Button" BasedOn="{StaticResource Ts.CaptionButton}">
+                <Setter Property="shell:WindowChrome.IsHitTestVisibleInChrome" Value="True" />
+            </Style>
+            <Style x:Key="CloseCaptionButton" TargetType="Button" BasedOn="{StaticResource Ts.CloseCaptionButton}">
+                <Setter Property="shell:WindowChrome.IsHitTestVisibleInChrome" Value="True" />
+            </Style>
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>
