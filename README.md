@@ -55,10 +55,9 @@ Entities ← Application ← Infrastructure
 ## Требования
 
 - Windows x64;
-- [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) для сборки; готовый self-contained ZIP содержит необходимые среды .NET;
+- [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) для сборки. Готовые EXE и ZIP содержат .NET;
 - Discord-приложение с ботом и разрешениями `Guilds`, `Guild Messages`, `Message Content`, `Guild Voice States`;
-- `ffmpeg.exe`, `ffplay.exe` и `ffprobe.exe` в `src/Kvasir/appdata`;
-- `yt-dlp.exe` в `src/Kvasir/appdata`.
+- FFmpeg и `yt-dlp.exe` в `src/Kvasir/appdata` при сборке из исходников. Оба компонента входят в готовые EXE и ZIP.
 
 Нативные библиотеки DAVE и Opus уже входят в репозиторий и готовый релиз.
 
@@ -161,9 +160,9 @@ dotnet publish src/Kvasir/Kvasir.csproj -c Release -r win-x64 --self-contained t
 dotnet publish src/Kvasir.Desktop/Kvasir.Desktop.csproj -c Release -r win-x64 --self-contained true -o artifacts/publish/win-x64 -m:1 -p:UseSharedCompilation=false
 ```
 
-Теги вида `v*` запускают GitHub Actions: проект проверяется, публикуется для Windows x64, упаковывается в ZIP и прикрепляется к GitHub Release.
+Теги вида `v*` запускают GitHub Actions. Workflow проверяет и публикует для Windows x64 один EXE и ZIP.
 
-Новые релизы содержат `Kvasir.Desktop.exe` в корне архива и сам бот в папке `bot`. Оба приложения публикуются self-contained, отдельная установка .NET для готового ZIP не требуется. Комплект содержит только шаблоны `Defaults/configuration.json`; пользовательская конфигурация, база и настройки остаются в AppData и при обновлении не перезаписываются. После сборки решения бот также автоматически размещается рядом с WPF в папке `bot`.
+Скачайте `Kvasir-v<версия>-win-x64.exe` для запуска одним файлом. При первом запуске .NET извлечёт встроенные компоненты в пользовательский кэш. Для запуска из ZIP распакуйте архив и откройте `Kvasir.Desktop.exe`. В обоих вариантах пользовательская конфигурация, база и настройки хранятся в `%LOCALAPPDATA%\Kvasir`.
 
 ## Безопасность
 

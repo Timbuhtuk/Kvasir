@@ -5,14 +5,14 @@
 Для работы release workflow необходимо настроить следующие secrets в настройках репозитория (Settings → Secrets and variables → Actions):
 
 ### FFMPEG_URL (опционально)
-URL для скачивания архива FFmpeg для Windows. Если не указан, FFmpeg не будет скачан автоматически.
+URL для скачивания архива со статической сборкой FFmpeg для Windows. По умолчанию release workflow использует проверенную по SHA-256 сборку из `scripts/prepare-release-media.ps1`.
 
 Примеры:
 - `https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip`
 - `https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip`
 
 ### YTDLP_URL (опционально)
-URL для скачивания yt-dlp.exe. Если не указан, будет использована последняя версия с GitHub.
+URL для скачивания yt-dlp.exe. По умолчанию release workflow использует указанную в `scripts/prepare-release-media.ps1` версию и сверяет её SHA-256.
 
 Пример:
 - `https://github.com/yt-dlp/yt-dlp/releases/download/2024.01.07/yt-dlp.exe`
@@ -54,4 +54,4 @@ dotnet run --project tests/Kvasir.Tests -c Release -- --live-discord
 ```
 
 ### Release
-Запускается при создании тега `v*` или вручную. Собирает приложение и создает архив для релиза.
+Запускается при создании тега `v*` или вручную. Собирает EXE и ZIP для Windows x64. Перед публикацией запускает EXE из отдельной папки и проверяет, что встроенные FFmpeg и yt-dlp запускаются.

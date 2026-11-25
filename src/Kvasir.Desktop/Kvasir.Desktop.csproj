@@ -9,6 +9,17 @@
     <ApplicationIcon>..\Kvasir\appdata\ds_bot_logo.ico</ApplicationIcon>
     <RestoreAdditionalProjectSources>$(MSBuildThisFileDirectory)..\..\vendor\nuget;$(RestoreAdditionalProjectSources)</RestoreAdditionalProjectSources>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(StandaloneBotDirectory)' != ''">
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeAllContentForSelfExtract>true</IncludeAllContentForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <DebugType>embedded</DebugType>
+    <AllowedReferenceRelatedFileExtensions>.xml</AllowedReferenceRelatedFileExtensions>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(StandaloneBotDirectory)' != ''">
+    <Content Include="$(StandaloneBotDirectory)\**\*" Exclude="$(StandaloneBotDirectory)\**\*.pdb;$(StandaloneBotDirectory)\appdata\ffplay.exe;$(StandaloneBotDirectory)\appdata\ffprobe.exe"
+             Link="bot\%(RecursiveDir)%(Filename)%(Extension)" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Tessera.WpfStyles" Version="0.3.0" />
     <ProjectReference Include="..\Kvasir.Control\Kvasir.Control.csproj" />
@@ -23,7 +34,7 @@
     <Content Include="..\..\vendor\Tessera.WpfStyles\licenses\*.txt" Link="licenses\%(Filename)%(Extension)"
              CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
-  <Target Name="CopyBotForDesktop" AfterTargets="Build">
+  <Target Name="CopyBotForDesktop" AfterTargets="Build" Condition="'$(StandaloneBotDirectory)' == ''">
     <MSBuild Projects="..\Kvasir\Kvasir.csproj" Targets="GetTargetPath" Properties="Configuration=$(Configuration);TargetFramework=net10.0">
       <Output TaskParameter="TargetOutputs" ItemName="BotAssembly" />
     </MSBuild>
