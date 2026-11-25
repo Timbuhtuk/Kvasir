@@ -41,7 +41,14 @@ internal static class Program
             ConfigurationChecks(root);
             ProblemChecks();
             PipeChecksAsync().GetAwaiter().GetResult();
-            var app = new App { ShutdownMode = ShutdownMode.OnExplicitShutdown }; app.InitializeComponent();
+            _ = new System.Windows.Application
+            {
+                ShutdownMode = ShutdownMode.OnExplicitShutdown,
+                Resources = new ResourceDictionary
+                {
+                    Source = new Uri("pack://application:,,,/Kvasir.Desktop;component/AppResources.xaml")
+                }
+            };
             ThemeChecks();
             AppearanceChecks(root);
             WorkspaceChecks();
