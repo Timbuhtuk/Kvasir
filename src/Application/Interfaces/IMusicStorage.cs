@@ -27,6 +27,7 @@ public interface IMediaCache
     int? PreparingSongId => null;
     Task<Stream?> TryOpenReadyAsync(Song song, CancellationToken cancellationToken);
     Task<Stream> OpenAsync(Song song, CancellationToken cancellationToken = default);
+    Task<Stream> OpenPlaybackStreamAsync(Stream source, CancellationToken cancellationToken) => Task.FromResult(source);
     Task<CacheReport> InspectAsync();
     Task<CacheReport> MaintainAsync(bool repair, CancellationToken cancellationToken = default);
     Task TrimAsync(CancellationToken cancellationToken = default);

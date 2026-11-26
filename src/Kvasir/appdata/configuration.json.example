@@ -3,6 +3,7 @@
   "owner_id": "",
   "music_client": {
     "music_folder": "music",
+    "decode_on_playback": false,
     "cache_limit_mb": 2048,
     "cache_max_age_days": 30,
     "preferences_file": "appdata/music-preferences.json",

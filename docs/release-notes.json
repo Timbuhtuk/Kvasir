@@ -1,0 +1,38 @@
+{
+  "releases": [
+    {
+      "version": "1.2.0",
+      "title": {
+        "ru": "Патчноуты и два режима аудиокэша",
+        "en": "Release notes and two audio cache modes"
+      },
+      "notes": {
+        "ru": [
+          "Патчноуты открываются при первом запуске новой версии. История выпусков доступна в «Настройки → Что нового».",
+          "В настройках бота можно выбрать, когда конвертировать звук. «Место на диске» сохраняет готовый PCM при загрузке. «Процессор» хранит сжатый файл и декодирует его с буфером при воспроизведении."
+        ],
+        "en": [
+          "Release notes open on the first launch of a new version. Browse previous versions under Settings → What's new.",
+          "Choose when the bot converts audio. Disk space mode stores PCM during download. CPU mode keeps the original compressed file and decodes it with a buffer during playback."
+        ]
+      }
+    },
+    {
+      "version": "1.1.4",
+      "title": {
+        "ru": "Один EXE для Windows",
+        "en": "One EXE for Windows"
+      },
+      "notes": {
+        "ru": [
+          "Standalone-файл включает десктопный пульт, бота, .NET, FFmpeg и yt-dlp. Для обновления можно заменить EXE и продолжить с текущими настройками.",
+          "Для запуска из распакованной папки также доступен ZIP-архив."
+        ],
+        "en": [
+          "The standalone file includes the desktop app, bot, .NET, FFmpeg, and yt-dlp. Replace the EXE to update and keep your settings.",
+          "A ZIP package is also available for running from an extracted folder."
+        ]
+      }
+    }
+  ]
+}

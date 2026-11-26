@@ -4,6 +4,8 @@ namespace Kvasir.Media;
 
 public struct FfmpegInteractor
 {
+    internal const string NormalizationFilter = "loudnorm=I=-16:TP=-1.5:LRA=11";
+
     /// <summary>
     /// Converts MP3 file to PCM bytes (s16le, 48000 Hz, stereo)
     /// </summary>
@@ -96,7 +98,7 @@ public struct FfmpegInteractor
 
         ProcessStartInfo processStartInfo = new() {
             FileName = ffmpegPath,
-            Arguments = $"-nostdin -loglevel error -progress pipe:1 -nostats -y -i \"{file_path}\" -af loudnorm=I=-16:TP=-1.5:LRA=11 -f s16le -ar 48000 -ac 2 \"{output_file_path}\"",
+            Arguments = $"-nostdin -loglevel error -progress pipe:1 -nostats -y -i \"{file_path}\" -af {NormalizationFilter} -f s16le -ar 48000 -ac 2 \"{output_file_path}\"",
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,

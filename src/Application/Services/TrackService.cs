@@ -61,10 +61,12 @@ public sealed class TrackService(IServiceScopeFactory scopes, IMediaCache cache)
     public async Task<Stream> OpenAsync(Song song, CancellationToken token)
     {
         Stream? ready = await cache.TryOpenReadyAsync(song, token);
-        if (ready != null) return ready;
-
-        await PrepareAsync(song, token, next: true);
-        return await cache.OpenAsync(song, token);
+        if (ready == null)
+        {
+            await PrepareAsync(song, token, next: true);
+            ready = await cache.OpenAsync(song, token);
+        }
+        return await cache.OpenPlaybackStreamAsync(ready, token);
     }
 
     public async Task PrepareAsync(Song song, CancellationToken token, bool next = false)

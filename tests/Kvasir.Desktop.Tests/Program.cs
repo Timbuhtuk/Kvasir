@@ -51,6 +51,7 @@ internal static class Program
             };
             ThemeChecks();
             AppearanceChecks(root);
+            ReleaseNotesChecks(root);
             WorkspaceChecks();
             PlaylistDialogChecks();
             LayoutChecks();
@@ -63,6 +64,35 @@ internal static class Program
             string full = Path.GetFullPath(root);
             if (Path.GetDirectoryName(full) == Path.GetFullPath(Path.GetTempPath()).TrimEnd(Path.DirectorySeparatorChar) && Path.GetFileName(full).StartsWith("kvasir-desktop-tests-", StringComparison.Ordinal))
                 Directory.Delete(full, true);
+        }
+    }
+
+    private static void ReleaseNotesChecks(string root)
+    {
+        ReleaseNotes notes = ReleaseNotes.Bundled;
+        Check((!ReleaseNotes.IsReleaseBuild || notes.Current.Version == ReleaseNotes.InstalledVersion.ToString(3)) && notes.Entries.Count > 1,
+            "The bundled release catalog matches the running version and includes history");
+        var state = new ReleaseNotesState(Path.Combine(root, "release-notes-state.json"));
+        Check(!state.HasSeen(notes.Current.Version) && state.MarkSeen(notes.Current.Version) &&
+            state.HasSeen(notes.Current.Version) && !state.HasSeen("9.9.9"), "Release notes are marked as seen per version");
+
+        var window = new ReleaseNotesWindow(notes, state);
+        try
+        {
+            var picker = (ComboBox)window.FindName("VersionBox");
+            Check(ReferenceEquals(picker.SelectedItem, notes.Current), "Release notes open on the installed version");
+            picker.SelectedIndex = 1;
+            Check(ReferenceEquals(picker.SelectedItem, notes.Entries[1]) && notes.Entries[1].Items.Length > 0,
+                "The release notes picker opens historical entries");
+            string russian = notes.Current.Heading;
+            UiText.SelectLanguage("en");
+            Check(notes.Current.Heading != russian && notes.Current.Items.All(item => !string.IsNullOrWhiteSpace(item)),
+                "Release notes follow the interface language");
+        }
+        finally
+        {
+            window.Close();
+            UiText.SelectLanguage("ru");
         }
     }
 
@@ -93,10 +123,23 @@ internal static class Program
             "An invalid setting does not hide other saved settings");
         File.WriteAllText(path, """{ "theme": "Dark", "language": "ru", "notificationPosition": "TopRight" }""");
 
-        var constructor = typeof(SettingsWindow).GetConstructor(BindingFlags.NonPublic | BindingFlags.Instance, [typeof(string)])!;
-        var window = (SettingsWindow)constructor.Invoke([path]);
+        string botConfigPath = Path.Combine(root, "audio-settings.json");
+        File.WriteAllText(botConfigPath, """{ "music_client": { "cache_limit_mb": 512 } }""");
+        var botConfig = new BotConfiguration(botConfigPath);
+        var constructor = typeof(SettingsWindow).GetConstructor(BindingFlags.NonPublic | BindingFlags.Instance,
+            [typeof(string), typeof(BotConfiguration)])!;
+        var window = (SettingsWindow)constructor.Invoke([path, botConfig]);
         try
         {
+            var audioMode = (ComboBox)window.FindName("AudioConversionBox");
+            Check((string)audioMode.SelectedValue == "disk", "Older configurations default to conversion during download");
+            audioMode.SelectedValue = "cpu";
+            using (JsonDocument saved = JsonDocument.Parse(File.ReadAllText(botConfigPath)))
+                Check(botConfig.ReadDecodeOnPlayback() && saved.RootElement.GetProperty("music_client").GetProperty("cache_limit_mb").GetInt32() == 512,
+                    "CPU mode persists in the bot configuration alongside existing settings");
+            audioMode.SelectedValue = "disk";
+            Check(!botConfig.ReadDecodeOnPlayback(), "Switching back saves disk mode");
+
             var languages = (ComboBox)window.FindName("LanguageBox");
             languages.SelectedValue = "en";
             Check(DesktopPreferences.Load(path).Language == "en" && UiText.Language == "ru" &&
@@ -125,7 +168,7 @@ internal static class Program
                 "Theme applies immediately and preserves the chosen language and notification position");
 
             UiText.SelectLanguage(DesktopPreferences.Load(path).Language);
-            var localized = (SettingsWindow)constructor.Invoke([path]);
+            var localized = (SettingsWindow)constructor.Invoke([path, botConfig]);
             try
             {
                 Check(localized.Title == "Kvasir settings" &&

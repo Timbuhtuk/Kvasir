@@ -22,6 +22,8 @@ public interface IAudioDownloaderService
 
     Task<bool> DownloadAsync(string link, string path, string title, CancellationToken token) => DownloadAsync(link, path, token);
 
+    Task<bool> DownloadCompressedAsync(string link, string path, string title, CancellationToken cancellationToken);
+
     /// <summary>
     /// Downloads audio file for the given song (uses song.Link and song.FilePath).
     /// Automatically creates output directory if it doesn't exist.

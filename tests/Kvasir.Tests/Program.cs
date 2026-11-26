@@ -85,6 +85,7 @@ internal static partial class Program
             await TestLibraryAsync(provider, config);
             await TestDesktopPlaylistImportAsync(provider, root);
             await TestCacheAsync(provider, root);
+            await TestAudioConversionModesAsync(provider, config, root);
             await TestPlaybackAndPanelsAsync(provider, root);
             await TestSoundboardAsync(provider, root);
             if (args.Length > 0)
@@ -264,6 +265,42 @@ internal static partial class Program
         var report = await cache.MaintainAsync(true); Check(report.Repaired > 0 && new FileInfo(pcm).Length == 192000, "Truncated PCM repairs");
         Check(!((MediaCacheService)cache).IsManaged(Path.Combine(root, "outside.pcm")), "Cleanup path confined to cache root");
     }
+    private static async Task TestAudioConversionModesAsync(ServiceProvider provider, IConfiguration config, string root)
+    {
+        var cache = provider.GetRequiredService<IMediaCache>();
+        const string key = "music_client:decode_on_playback";
+        Song song = new() { Id = 35 };
+        string compressed = Path.Combine(root, "music", "35.audio");
+        string pcm = Path.Combine(root, "music", "35.norm.pcm");
+        config[key] = "true";
+        try
+        {
+            await using (Stream existing = await cache.OpenAsync(new Song { Id = 1 }))
+                Check(existing is FileStream file && file.Name.EndsWith(".norm.pcm"), "Existing PCM plays in either mode");
+
+            await using (Stream source = await cache.OpenAsync(song))
+            {
+                Check(source.Length == 128 && File.Exists(compressed) && !File.Exists(pcm), "CPU mode caches the compressed download");
+                CacheReport report = await cache.InspectAsync();
+                Check(report.Bytes >= source.Length && report.Files > 0, "Compressed audio is included in cache accounting");
+            }
+
+            var downloader = (FakeDownloader)provider.GetRequiredService<IAudioDownloaderService>();
+            downloader.BeforeDownload = (_, _) => throw new InvalidOperationException("Unexpected redownload");
+            try
+            {
+                config[key] = "false";
+                await using Stream source = await cache.OpenAsync(song);
+                Check(source.Length == 192000 && File.Exists(pcm), "Disk mode prepares PCM from a cached compressed file");
+            }
+            finally { downloader.BeforeDownload = null; }
+
+            File.SetLastWriteTimeUtc(compressed, DateTime.UtcNow.AddDays(-10));
+            await cache.TrimAsync();
+            Check(!File.Exists(compressed) && File.Exists(pcm), "Cache cleanup evicts aged compressed files too");
+        }
+        finally { config[key] = null; }
+    }
     private static async Task TestPlaybackAndPanelsAsync(ServiceProvider provider, string root)
     {
         var prefs = provider.GetRequiredService<IMusicPreferences>(); await prefs.SaveSettingsAsync(1, new GuildMusicSettings { VoteSkip = true, Volume = 50 });
@@ -355,6 +392,7 @@ internal static partial class Program
         Check(new FileInfo(output).Length == samples.Length, "Real FFmpeg preserves sample format and duration");
         byte[] normalized = await File.ReadAllBytesAsync(output);
         Check(normalized.Any(b => b != 0) && !normalized.SequenceEqual(samples), "Real loudnorm changes gain without silencing the signal");
+        await TestBufferedDecodeAsync(root);
         await TestNativeSoundEffectsAsync(root);
     }
 }
@@ -381,6 +419,13 @@ internal sealed class FakeFinder : IVideoFinderService
 }
 internal sealed class FakeDownloader : IAudioDownloaderService
 {
+    public async Task<bool> DownloadCompressedAsync(string link, string path, string title, CancellationToken cancellationToken)
+    {
+        if (BeforeDownload is { } before) await before(link, cancellationToken);
+        if (link == "fail") return false;
+        await File.WriteAllBytesAsync(path, new byte[128], cancellationToken);
+        return true;
+    }
     public Func<string, CancellationToken, Task>? BeforeDownload { get; set; }
     public async Task<bool> DownloadAsync(string videoLink, string outputFilePath, CancellationToken cancellationToken = default)
     {
@@ -394,6 +439,8 @@ internal sealed class FakeDownloader : IAudioDownloaderService
 }
 internal sealed class FakeNormalizer : IAudioNormalizer
 {
+    public Task NormalizeCompressedAsync(string source, string destination, CancellationToken cancellationToken) =>
+        File.WriteAllBytesAsync(destination, new byte[192000], cancellationToken);
     public Task NormalizeAsync(string source, string destination, CancellationToken cancellationToken) { File.Copy(source, destination, true); return Task.CompletedTask; }
 }
 internal sealed class FakePlaybackCache : IMediaCache

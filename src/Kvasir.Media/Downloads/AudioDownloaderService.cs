@@ -17,18 +17,24 @@ public class AudioDownloaderService(MediaActivity? activity = null)
     public Task<bool> DownloadAsync(string? link, string? path, CancellationToken cancellationToken = default) =>
         DownloadAsync(link, path, link ?? "", cancellationToken);
 
-    public async Task<bool> DownloadAsync(string? link, string? path, string title, CancellationToken cancellationToken)
+    public Task<bool> DownloadAsync(string? link, string? path, string title, CancellationToken cancellationToken) =>
+        DownloadAsync(link, path, title, convertToPcm: true, cancellationToken);
+
+    public Task<bool> DownloadCompressedAsync(string link, string path, string title, CancellationToken cancellationToken) =>
+        DownloadAsync(link, path, title, convertToPcm: false, cancellationToken);
+
+    private async Task<bool> DownloadAsync(string? link, string? path, string title, bool convertToPcm, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(link) || string.IsNullOrWhiteSpace(path)) return false;
         string? directory = Path.GetDirectoryName(path);
         if (!string.IsNullOrWhiteSpace(directory)) Directory.CreateDirectory(directory);
         return await _activity.RunAsync(title, MediaStage.Connecting, async operation =>
         {
-            try { return await DownloadWithYoutubeDLSharp(link, path, cancellationToken, operation); }
+            try { return await DownloadWithYoutubeDLSharp(link, path, cancellationToken, operation, convertToPcm); }
             catch (Exception ex) when (ex is not (OperationCanceledException or MediaSourceException or PCMConvertetionException))
             {
                 System.Diagnostics.Trace.WriteLine(ex);
-                return await DownloadWithYoutubeExplode(link, path, cancellationToken, operation);
+                return await DownloadWithYoutubeExplode(link, path, cancellationToken, operation, convertToPcm);
             }
         });
     }
@@ -38,7 +44,7 @@ public class AudioDownloaderService(MediaActivity? activity = null)
             ? DownloadWithYoutubeExplode(link, path, token, operation)
             : DownloadWithYoutubeDLSharp(link, path, token, operation));
 
-    private async Task<bool> DownloadWithYoutubeExplode(string videoLink, string outputFilePath, CancellationToken cancellationToken, MediaOperation operation)
+    private async Task<bool> DownloadWithYoutubeExplode(string videoLink, string outputFilePath, CancellationToken cancellationToken, MediaOperation operation, bool convertToPcm = true)
     {
         operation.Report(MediaStage.Connecting, "YoutubeExplode");
         YoutubeExplode.Videos.Video video = await _youtube.Videos.GetAsync(videoLink, cancellationToken);
@@ -70,16 +76,10 @@ public class AudioDownloaderService(MediaActivity? activity = null)
             var progress = new InlineProgress(value => operation.Report(MediaStage.Downloading, "YoutubeExplode",
                 (long)(audioStreamInfo.Size.Bytes * value), value * 100));
             await _youtube.Videos.Streams.DownloadAsync(audioStreamInfo, tempMp3Path, progress, cancellationToken);
-            operation.Report(MediaStage.Converting, "FFmpeg");
             watch.Stop();
             System.Diagnostics.Trace.WriteLine($"Download completed in {watch.Elapsed}");
 
-            string? convertedPath = await FfmpegInteractor.ConvertMp3ToPcm(tempMp3Path, outputFilePath, cancellationToken, operation);
-
-            if (convertedPath == null || !File.Exists(convertedPath))
-                throw new PCMConvertetionException();
-
-            return true;
+            return await SaveDownloadAsync(tempMp3Path, outputFilePath, convertToPcm, cancellationToken, operation);
         }
         finally
         {
@@ -88,7 +88,7 @@ public class AudioDownloaderService(MediaActivity? activity = null)
         }
     }
 
-    private async Task<bool> DownloadWithYoutubeDLSharp(string videoLink, string outputFilePath, CancellationToken cancellationToken, MediaOperation operation)
+    private async Task<bool> DownloadWithYoutubeDLSharp(string videoLink, string outputFilePath, CancellationToken cancellationToken, MediaOperation operation, bool convertToPcm = true)
     {
         string temporary = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".audio");
         try
@@ -102,12 +102,26 @@ public class AudioDownloaderService(MediaActivity? activity = null)
                     if (!long.TryParse(fields[2], out long total)) long.TryParse(fields[3], out total);
                     operation.Report(MediaStage.Downloading, "yt-dlp", bytes, total > 0 ? 100d * bytes / total : null);
                 });
-            operation.Report(MediaStage.Converting, "FFmpeg");
-            string? converted = await FfmpegInteractor.ConvertMp3ToPcm(temporary, outputFilePath, cancellationToken, operation);
-            if (converted == null || !File.Exists(converted)) throw new PCMConvertetionException();
-            return true;
+            return await SaveDownloadAsync(temporary, outputFilePath, convertToPcm, cancellationToken, operation);
         }
         finally { if (File.Exists(temporary)) File.Delete(temporary); }
+    }
+
+    private static async Task<bool> SaveDownloadAsync(string source, string destination, bool convertToPcm,
+        CancellationToken cancellationToken, MediaOperation operation)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (convertToPcm)
+        {
+            operation.Report(MediaStage.Converting, "FFmpeg");
+            string? converted = await FfmpegInteractor.ConvertMp3ToPcm(source, destination, cancellationToken, operation);
+            if (converted == null || !File.Exists(converted)) throw new PCMConvertetionException();
+        }
+        else
+        {
+            File.Move(source, destination, overwrite: true);
+        }
+        return true;
     }
 
     private sealed class InlineProgress(Action<double> report) : IProgress<double>

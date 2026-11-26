@@ -8,6 +8,8 @@ public sealed class MissingBotTokenException() : InvalidOperationException("Дл
 
 public sealed class BotConfiguration(string? path = null)
 {
+    public const string DecodeOnPlaybackKey = "decode_on_playback";
+
     public string FilePath { get; } = path ?? ApplicationPaths.ConfigurationFile;
     private JsonObject Read()
     {
@@ -34,6 +36,26 @@ public sealed class BotConfiguration(string? path = null)
         var root = Read();
         if (root["tokens"] is not JsonArray tokens) { tokens = []; root["tokens"] = tokens; }
         if (tokens.Count == 0) tokens.Add(token); else tokens[0] = token;
+        Save(root);
+    }
+
+    public bool ReadDecodeOnPlayback() =>
+        Read()["music_client"] is JsonObject music &&
+        music[DecodeOnPlaybackKey] is JsonValue setting &&
+        bool.TryParse(setting.ToString(), out bool enabled) && enabled;
+
+    public void SaveDecodeOnPlayback(bool enabled)
+    {
+        var root = Read();
+        if (root["music_client"] == null) root["music_client"] = new JsonObject();
+        if (root["music_client"] is not JsonObject music)
+            throw new JsonException("music_client должен быть объектом.");
+        music[DecodeOnPlaybackKey] = enabled;
+        Save(root);
+    }
+
+    private void Save(JsonObject root)
+    {
         string directory = Path.GetDirectoryName(Path.GetFullPath(FilePath))!;
         string temporary = Path.Combine(directory, ".configuration-" + Guid.NewGuid().ToString("N") + ".tmp");
         try

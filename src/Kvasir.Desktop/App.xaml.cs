@@ -12,7 +12,7 @@ public partial class App : System.Windows.Application
             string root = System.AppContext.BaseDirectory;
             bool hasTemplate = System.IO.File.Exists(System.IO.Path.Combine(root, "Defaults", "configuration.json"));
             bool hasBot = System.IO.File.Exists(System.IO.Path.Combine(root, "bot", "Kvasir.exe"));
-            Shutdown(hasTemplate && hasBot ? 0 : 1);
+            Shutdown(hasTemplate && hasBot && ReleaseNotesWindow.LoadCatalog() != null ? 0 : 1);
             return;
         }
 

@@ -15,26 +15,63 @@ namespace Kvasir.Desktop;
 public partial class SettingsWindow : Window
 {
     private readonly string _preferencesPath;
+    private readonly BotConfiguration _botConfiguration;
     private DesktopPreferences _preferences;
+    private bool _decodeOnPlayback;
     private bool _initialized;
     private RadioButton? _selectedPosition;
     internal event Action<NotificationPlacement>? NotificationPositionChanged;
     internal bool OpenJournal { get; private set; }
     public bool TokenChanged { get; private set; }
 
-    public SettingsWindow() : this(ApplicationPaths.DesktopSettingsFile) { }
+    public SettingsWindow() : this(ApplicationPaths.DesktopSettingsFile, new BotConfiguration()) { }
 
-    internal SettingsWindow(string preferencesPath)
+    internal SettingsWindow(string preferencesPath, BotConfiguration botConfiguration)
     {
         _preferencesPath = preferencesPath;
+        _botConfiguration = botConfiguration;
         _preferences = DesktopPreferences.Load(preferencesPath) with { Theme = ThemeManager.Current };
         InitializeComponent();
-        ConfigurationPathBox.Text = ApplicationPaths.ConfigurationFile;
+        ConfigurationPathBox.Text = _botConfiguration.FilePath;
+        LoadAudioConversion();
         LanguageBox.SelectedValue = _preferences.Language;
         UpdateLanguageHint();
         ConfigureNotificationPositions();
         ThemeButton(_preferences.Theme).IsChecked = true;
         _initialized = true;
+    }
+
+    private void LoadAudioConversion()
+    {
+        try
+        {
+            _decodeOnPlayback = _botConfiguration.ReadDecodeOnPlayback();
+            AudioConversionBox.SelectedValue = _decodeOnPlayback ? "cpu" : "disk";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
+        {
+            AudioConversionBox.IsEnabled = false;
+            SettingsMessage.Text = UiText.Get("ReadAudioConversionFailed");
+        }
+    }
+
+    private void AudioConversionSelected(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_initialized || AudioConversionBox.SelectedValue is not string choice) return;
+        bool enabled = choice == "cpu";
+        if (enabled == _decodeOnPlayback) return;
+
+        try
+        {
+            _botConfiguration.SaveDecodeOnPlayback(enabled);
+            _decodeOnPlayback = enabled;
+            SettingsMessage.Text = "";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
+        {
+            AudioConversionBox.SelectedValue = _decodeOnPlayback ? "cpu" : "disk";
+            SettingsMessage.Text = UiText.Get("SaveAudioConversionFailed");
+        }
     }
 
     private void LanguageSelected(object sender, SelectionChangedEventArgs e)
@@ -143,7 +180,16 @@ public partial class SettingsWindow : Window
         }
     }
 
-    private void OpenConfiguration_Click(object sender, RoutedEventArgs e) => OpenPath(ApplicationPaths.ConfigurationFile);
+    private void OpenConfiguration_Click(object sender, RoutedEventArgs e) => OpenPath(_botConfiguration.FilePath);
+    private void ReleaseNotes_Click(object sender, RoutedEventArgs e)
+    {
+        if (ReleaseNotesWindow.LoadCatalog() is not { } notes)
+        {
+            SettingsMessage.Text = UiText.Get("ReleaseNotesUnavailable");
+            return;
+        }
+        new ReleaseNotesWindow(notes, ReleaseNotesState.Local) { Owner = this }.ShowDialog();
+    }
     private void Token_Click(object sender, RoutedEventArgs e)
     {
         if (new TokenDialog { Owner = this }.ShowDialog() == true) { TokenChanged = true; Close(); }

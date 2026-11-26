@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version tag (e.g., v1.1.1)'
+        description: 'Version tag (e.g., v1.2.0)'
         required: true
         type: string
 
@@ -32,7 +32,10 @@ jobs:
         if ($version -notmatch '^v\d+\.\d+\.\d+$') {
           throw "Version must have the vMAJOR.MINOR.PATCH format"
         }
+        $number = ([version] $version.Substring(1)).ToString(3)
+        if ($version -cne "v$number") { throw 'Version segments must not have leading zeroes.' }
         "KVASIR_RELEASE_TAG=$version" >> $env:GITHUB_ENV
+        "KVASIR_RELEASE_VERSION=$number" >> $env:GITHUB_ENV
 
     - name: Setup .NET
       uses: actions/setup-dotnet@v4
@@ -66,7 +69,7 @@ jobs:
       run: dotnet publish src/Kvasir/Kvasir.csproj --configuration Release --output ./artifacts/publish/win-x64/bot --runtime win-x64 --self-contained true --no-restore -m:1 -p:UseSharedCompilation=false
 
     - name: Publish desktop interface
-      run: dotnet publish src/Kvasir.Desktop/Kvasir.Desktop.csproj --configuration Release --output ./artifacts/publish/win-x64 --runtime win-x64 --self-contained true --no-restore -m:1 -p:UseSharedCompilation=false
+      run: dotnet publish src/Kvasir.Desktop/Kvasir.Desktop.csproj --configuration Release --output ./artifacts/publish/win-x64 --runtime win-x64 --self-contained true --no-restore "-p:Version=$env:KVASIR_RELEASE_VERSION" -m:1 -p:UseSharedCompilation=false
 
     - name: Verify release layout and configuration
       run: |
@@ -103,11 +106,14 @@ jobs:
     - name: Publish standalone EXE
       run: |
         $bot = (Resolve-Path -LiteralPath 'artifacts/publish/win-x64/bot').Path
-        dotnet publish src/Kvasir.Desktop/Kvasir.Desktop.csproj --configuration Release --output ./artifacts/standalone --runtime win-x64 --self-contained true "-p:StandaloneBotDirectory=$bot" -m:1 -p:UseSharedCompilation=false --warnaserror
+        dotnet publish src/Kvasir.Desktop/Kvasir.Desktop.csproj --configuration Release --output ./artifacts/standalone --runtime win-x64 --self-contained true "-p:StandaloneBotDirectory=$bot" "-p:Version=$env:KVASIR_RELEASE_VERSION" -m:1 -p:UseSharedCompilation=false --warnaserror
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         $files = @(Get-ChildItem -LiteralPath artifacts/standalone -Force)
         if ($files.Count -ne 1 -or $files[0].Name -ne 'Kvasir.Desktop.exe') {
           throw 'The standalone publish must produce exactly one EXE.'
+        }
+        if (([version] $files[0].VersionInfo.FileVersion).ToString(3) -ne $env:KVASIR_RELEASE_VERSION) {
+          throw 'The standalone EXE version must match the release tag.'
         }
         Move-Item -LiteralPath $files[0].FullName -Destination "./artifacts/Kvasir-$env:KVASIR_RELEASE_TAG-win-x64.exe"
 
@@ -133,4 +139,13 @@ jobs:
         GH_TOKEN: ${{ github.token }}
       run: |
         $version = $env:KVASIR_RELEASE_TAG
-        gh release create $version "./artifacts/Kvasir-$version-win-x64.exe" "./artifacts/Kvasir-$version-win-x64.zip" --target $env:GITHUB_SHA --title "Kvasir $version" --notes-file docs/RELEASE_NOTES.md
+        $notes = (Get-Content -LiteralPath docs/release-notes.json -Raw | ConvertFrom-Json).releases[0]
+        if ($notes.version -cne $env:KVASIR_RELEASE_VERSION -or !$notes.title.ru -or !$notes.notes.ru) {
+          throw 'Current release notes are missing or do not match the release tag.'
+        }
+        $body = @("## $($notes.title.ru)", '')
+        $body += $notes.notes.ru | ForEach-Object { "- $_" }
+        $body += ''
+        $body += (Get-Content -LiteralPath docs/RELEASE_NOTES.md -Raw).Replace('{version}', $version)
+        $body | Set-Content -LiteralPath artifacts/github-release-notes.md -Encoding utf8
+        gh release create $version "./artifacts/Kvasir-$version-win-x64.exe" "./artifacts/Kvasir-$version-win-x64.zip" --target $env:GITHUB_SHA --title "Kvasir $version" --notes-file artifacts/github-release-notes.md

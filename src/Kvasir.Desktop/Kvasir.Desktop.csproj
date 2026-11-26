@@ -5,6 +5,7 @@
     <UseWPF>true</UseWPF>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <VersionPrefix>0.0.0</VersionPrefix>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>..\Kvasir\appdata\ds_bot_logo.ico</ApplicationIcon>
     <RestoreAdditionalProjectSources>$(MSBuildThisFileDirectory)..\..\vendor\nuget;$(RestoreAdditionalProjectSources)</RestoreAdditionalProjectSources>
@@ -21,6 +22,7 @@
              Link="bot\%(RecursiveDir)%(Filename)%(Extension)" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="Kvasir.Desktop.Tests" />
     <PackageReference Include="Tessera.WpfStyles" Version="0.3.0" />
     <ProjectReference Include="..\Kvasir.Control\Kvasir.Control.csproj" />
     <ProjectReference Include="..\Kvasir.Configuration\Kvasir.Configuration.csproj" />
@@ -29,6 +31,7 @@
     <Resource Include="..\Kvasir\appdata\ds_bot_logo.ico" Link="ds_bot_logo.ico" />
     <Resource Include="Assets\Icons\*.svg" />
     <EmbeddedResource Include="Localization\*.json" LogicalName="Kvasir.Localization.%(Filename)%(Extension)" />
+    <EmbeddedResource Include="..\..\docs\release-notes.json" LogicalName="Kvasir.ReleaseNotes.json" />
     <Content Include="..\..\docs\DESKTOP.md" Link="DESKTOP.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="..\..\docs\DESKTOP-VALIDATION.md" Link="DESKTOP-VALIDATION.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="..\..\vendor\Tessera.WpfStyles\licenses\*.txt" Link="licenses\%(Filename)%(Extension)"

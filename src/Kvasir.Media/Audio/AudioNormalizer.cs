@@ -6,6 +6,14 @@ public sealed class AudioNormalizer(MediaActivity? activity = null) : IAudioNorm
 {
     private readonly MediaActivity _activity = activity ?? new();
 
+    public Task NormalizeCompressedAsync(string source, string destination, CancellationToken cancellationToken) =>
+        _activity.RunAsync(Path.GetFileName(source), MediaStage.Converting, async operation =>
+        {
+            if (await FfmpegInteractor.ConvertMp3ToPcm(source, destination, cancellationToken, operation) == null)
+                throw new PCMConvertetionException();
+            return true;
+        });
+
     public Task NormalizeAsync(string source, string destination, CancellationToken cancellationToken) =>
         _activity.RunAsync(Path.GetFileName(source), MediaStage.Converting, async operation =>
     {

@@ -155,6 +155,13 @@
                 <TextBlock Text="{loc:Translate ThemeAppliedImmediatelySavedAutomatically}" Foreground="{DynamicResource Ts.TextMuted}" FontSize="11" TextWrapping="Wrap" Margin="0,4,0,6" />
                 <Separator Margin="0,12,0,16" />
                 <TextBlock Text="{loc:Translate BotConfiguration}" Style="{StaticResource Ts.CardTitleText}" Margin="0,0,0,8" />
+                <TextBlock Text="{loc:Translate AudioConversionPreference}" FontWeight="SemiBold" Margin="0,0,0,8" />
+                <ComboBox x:Name="AudioConversionBox" SelectionChanged="AudioConversionSelected" SelectedValuePath="Tag"
+                          AutomationProperties.Name="{loc:Translate AudioConversionPreference}" Margin="0,0,0,8">
+                    <ComboBoxItem Tag="disk" Content="{loc:Translate AudioConversionDisk}" />
+                    <ComboBoxItem Tag="cpu" Content="{loc:Translate AudioConversionCpu}" />
+                </ComboBox>
+                <TextBlock Text="{loc:Translate AudioConversionHint}" Style="{StaticResource Ts.Hint}" Margin="0,0,0,12" />
                 <TextBlock Text="{loc:Translate BotConfigurationHint}" Style="{StaticResource Ts.Hint}" />
                 <TextBox x:Name="ConfigurationPathBox" IsReadOnly="True" TextWrapping="Wrap" Margin="0,8,0,12"
                          AutomationProperties.Name="{loc:Translate BotConfigurationFile}" />
@@ -162,6 +169,7 @@
                     <Button Content="{loc:Translate ReplaceToken}" Click="Token_Click" Style="{StaticResource ActionButton}" />
                     <Button Content="{loc:Translate OpenConfiguration}" Click="OpenConfiguration_Click" Style="{StaticResource ActionButton}" />
                     <Button Content="{loc:Translate OpenDataFolder}" Click="OpenDataFolder_Click" Style="{StaticResource ActionButton}" />
+                    <Button Content="{loc:Translate ReleaseNotesTitle}" Click="ReleaseNotes_Click" Style="{StaticResource ActionButton}" />
                 </WrapPanel>
             </StackPanel>
         </ScrollViewer>

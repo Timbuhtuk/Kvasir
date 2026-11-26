@@ -40,7 +40,18 @@ public partial class MainWindow : Window
                     await _viewModel.StartAsync();
             }
             catch (Exception ex) { await ShowProblemAsync(ProblemCatalog.Describe(ex.ToString(), "configuration")); }
+            await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.ContextIdle);
+            ShowNewReleaseNotes();
         };
+    }
+
+    private void ShowNewReleaseNotes()
+    {
+        if (!ReleaseNotes.IsReleaseBuild || _closing || !IsVisible ||
+            ReleaseNotesWindow.LoadCatalog() is not { } notes) return;
+        ReleaseNotesState state = ReleaseNotesState.Local;
+        if (state.HasSeen(notes.Current.Version)) return;
+        new ReleaseNotesWindow(notes, state) { Owner = this, ShowActivated = false }.Show();
     }
 
     private async void Start_Click(object sender, RoutedEventArgs e) => await _viewModel.StartAsync();

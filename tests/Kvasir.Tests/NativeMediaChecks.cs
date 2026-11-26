@@ -2,6 +2,7 @@ using Kvasir.Media;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using System.Diagnostics;
 using Application.Models;
 using Application.Services;
 using Connectors.Media;
@@ -10,6 +11,40 @@ namespace Kvasir.Tests;
 
 internal static partial class Program
 {
+    private static async Task TestBufferedDecodeAsync(string root)
+    {
+        using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(15));
+        string path = Path.Combine(root, "сжатый трек.audio");
+        var info = new ProcessStartInfo(MediaTools.RuntimeFile("ffmpeg.exe"))
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+        string[] args = ["-nostdin", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=4",
+            "-c:a", "libmp3lame", "-f", "mp3", path];
+        foreach (string arg in args) info.ArgumentList.Add(arg);
+        using (Process process = Process.Start(info)!)
+        {
+            await process.WaitForExitAsync(timeout.Token);
+            Check(process.ExitCode == 0, "FFmpeg produces a compressed fixture");
+        }
+
+        await using (var pcm = await BufferedPcmStream.OpenAsync(File.OpenRead(path), timeout.Token))
+        {
+            byte[] frame = new byte[PcmEffectMixer.FrameBytes];
+            await pcm.ReadExactlyAsync(frame, timeout.Token);
+            Check(pcm.Position == frame.Length && frame.Any(b => b != 0), "Decode-on-playback provides a non-silent Discord PCM frame");
+            await pcm.SeekAsync(2 * PcmEffectMixer.BytesPerSecond, timeout.Token);
+            using MemoryStream tail = new();
+            await pcm.CopyToAsync(tail, timeout.Token);
+            Check(Math.Abs(tail.Length - 2 * PcmEffectMixer.BytesPerSecond) < frame.Length &&
+                pcm.Position == 2 * PcmEffectMixer.BytesPerSecond + tail.Length, "Buffered seek discards old audio and decodes from the requested time");
+            await pcm.SeekAsync(0, timeout.Token);
+        }
+        File.Delete(path);
+        Check(!File.Exists(path), "Closing a buffered decoder releases the source even with a full buffer");
+    }
+
     private static async Task TestYtDlpProcessAsync(string root)
     {
         byte[] wave = await File.ReadAllBytesAsync(Path.Combine(root, "эффект mono 22k.wav"));
@@ -39,6 +74,11 @@ internal static partial class Program
             Check(decoded.Length == PcmEffectMixer.BytesPerSecond && decoded.Any(b => b != 0), "Downloaded WAV converts to one second of non-silent Discord PCM");
             byte[]? direct = await FfmpegInteractor.ConvertMp3ToPcmBytes(Path.Combine(root, "эффект mono 22k.wav"));
             Check(direct != null && direct.Length == PcmEffectMixer.BytesPerSecond && direct.Any(b => b != 0), "FFmpeg can stream stereo PCM to stdout");
+
+            string compressed = Path.Combine(root, "yt-dlp audio.audio");
+            Check(await downloader.DownloadCompressedAsync(address + "/audio.wav", compressed, "Unconverted fixture", timeout.Token) &&
+                (await File.ReadAllBytesAsync(compressed, timeout.Token)).SequenceEqual(wave),
+                "Decode-on-playback downloads the original bytes without creating PCM");
 
             try
             {

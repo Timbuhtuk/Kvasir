@@ -5,6 +5,7 @@ using Entities.Models;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Kvasir.Configuration;
 
 namespace Infrastructure;
 
@@ -13,6 +14,7 @@ public sealed class MediaCacheService : IMediaCache
     private readonly IServiceScopeFactory _scopes;
     private readonly IAudioDownloaderService _downloader;
     private readonly IAudioNormalizer _normalizer;
+    private readonly IConfiguration _config;
     private readonly string _root;
     private readonly long _limit;
     private readonly int _maxAgeDays;
@@ -24,6 +26,7 @@ public sealed class MediaCacheService : IMediaCache
     public MediaCacheService(IServiceScopeFactory scopes, IAudioDownloaderService downloader, IAudioNormalizer normalizer, IConfiguration config)
     {
         _scopes = scopes; _downloader = downloader; _normalizer = normalizer;
+        _config = config;
         _root = Path.GetFullPath(config["music_client:music_folder"] ?? "music");
         _limit = long.TryParse(config["music_client:cache_limit_mb"], out long mb) ? Math.Clamp(mb, 64, 1048576) * 1024 * 1024 : 2L * 1024 * 1024 * 1024;
         _maxAgeDays = int.TryParse(config["music_client:cache_max_age_days"], out int days) ? Math.Clamp(days, 1, 3650) : 30;
@@ -43,7 +46,20 @@ public sealed class MediaCacheService : IMediaCache
         if (length < 4 || length % 4 != 0) return false;
         return seconds is not > 0 || Math.Abs(length / 192000d - seconds.Value) <= Math.Max(5, seconds.Value * .1);
     }
-    public async Task<Stream?> TryOpenReadyAsync(Song song, CancellationToken cancellationToken)
+    private bool DecodeOnPlayback =>
+        bool.TryParse(_config[$"music_client:{BotConfiguration.DecodeOnPlaybackKey}"], out bool enabled) && enabled;
+
+    private static bool IsCompressed(string path) => path.EndsWith(".audio", StringComparison.OrdinalIgnoreCase);
+
+    private static bool HasContent(string path) => new FileInfo(path) is { Exists: true, Length: > 0 };
+
+    private static bool ValidCachedFile(string path, double? seconds = null) =>
+        IsCompressed(path) ? HasContent(path) : Valid(path, seconds);
+
+    public Task<Stream?> TryOpenReadyAsync(Song song, CancellationToken cancellationToken) =>
+        TryOpenReadyAsync(song, DecodeOnPlayback, cancellationToken);
+
+    private async Task<Stream?> TryOpenReadyAsync(Song song, bool decodeOnPlayback, CancellationToken cancellationToken)
     {
         await _gate.WaitAsync(cancellationToken);
         try
@@ -51,8 +67,19 @@ public sealed class MediaCacheService : IMediaCache
             using var scope = _scopes.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<DiscordMusicDBContext>();
             Song entity = await db.Songs.FirstAsync(s => s.Id == song.Id, cancellationToken);
-            string destination = Destination(entity.Id);
-            if (!Valid(destination, entity.Duration)) return null;
+            string destination = Destination(entity.Id, decodeOnPlayback);
+            if (!ValidCachedFile(destination, entity.Duration))
+            {
+                if (!decodeOnPlayback) return null;
+                destination = Destination(entity.Id, false);
+                if (!Valid(destination, entity.Duration))
+                {
+                    if (entity.FilePath is not string legacy || !IsManaged(legacy) ||
+                        !legacy.EndsWith(".pcm", StringComparison.OrdinalIgnoreCase) || !Valid(legacy, entity.Duration))
+                        return null;
+                    destination = Path.GetFullPath(legacy);
+                }
+            }
 
             if (!entity.IsDownloaded || entity.FilePath != destination)
             {
@@ -67,14 +94,14 @@ public sealed class MediaCacheService : IMediaCache
         finally { _gate.Release(); }
     }
 
-    private string Destination(int id)
+    private string Destination(int id, bool compressed)
     {
-        string path = Path.Combine(_root, id + ".norm.pcm");
+        string path = Path.Combine(_root, id + (compressed ? ".audio" : ".norm.pcm"));
         if (!IsManaged(path)) throw new IOException("Небезопасный путь кэша.");
         return path;
     }
 
-    private Stream Lease(string path)
+    private FileStream Lease(string path)
     {
         void Release()
         {
@@ -87,43 +114,28 @@ public sealed class MediaCacheService : IMediaCache
 
     public async Task<Stream> OpenAsync(Song song, CancellationToken cancellationToken = default)
     {
-        Stream? ready = await TryOpenReadyAsync(song, cancellationToken);
+        bool decodeOnPlayback = DecodeOnPlayback;
+        Stream? ready = await TryOpenReadyAsync(song, decodeOnPlayback, cancellationToken);
         if (ready != null) return ready;
 
         await _prepare.WaitAsync(cancellationToken);
         try
         {
-            ready = await TryOpenReadyAsync(song, cancellationToken);
+            ready = await TryOpenReadyAsync(song, decodeOnPlayback, cancellationToken);
             if (ready != null) return ready;
 
             using var scope = _scopes.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<DiscordMusicDBContext>();
             Song entity = await db.Songs.FirstAsync(s => s.Id == song.Id, cancellationToken);
-            string destination = Destination(entity.Id);
+            string destination = Destination(entity.Id, decodeOnPlayback);
             string temporary = destination + ".part";
             if (!IsManaged(temporary)) throw new IOException("Небезопасный временный путь кэша.");
             Volatile.Write(ref _preparingSongId, entity.Id);
             try
             {
-                Stream? original = null;
-                await _gate.WaitAsync(cancellationToken);
-                try
-                {
-                    if (entity.FilePath is string path && IsManaged(path) && Valid(path, entity.Duration) &&
-                        !string.Equals(Path.GetFullPath(path), destination, StringComparison.OrdinalIgnoreCase))
-                        original = Lease(Path.GetFullPath(path));
-                }
-                finally { _gate.Release(); }
-
-                if (original != null)
-                {
-                    await using (original)
-                        await _normalizer.NormalizeAsync(entity.FilePath!, temporary, cancellationToken);
-                }
-                else if (string.IsNullOrWhiteSpace(entity.Link) || !await _downloader.DownloadAsync(entity.Link, temporary, entity.Name, cancellationToken))
-                    throw new IOException("Источник аудио недоступен.");
-
-                if (!Valid(temporary, entity.Duration)) throw new IOException("Загружен неполный аудиофайл.");
+                await PrepareFileAsync(entity, temporary, decodeOnPlayback, cancellationToken);
+                if (decodeOnPlayback ? !HasContent(temporary) : !Valid(temporary, entity.Duration))
+                    throw new IOException("Загружен неполный аудиофайл.");
                 await _gate.WaitAsync(cancellationToken);
                 try
                 {
@@ -141,7 +153,52 @@ public sealed class MediaCacheService : IMediaCache
         }
         finally { Volatile.Write(ref _preparingSongId, 0); _prepare.Release(); }
     }
-    private List<FileInfo> Files() => new DirectoryInfo(_root).EnumerateFiles("*.pcm", SearchOption.TopDirectoryOnly).Where(f => IsManaged(f.FullName)).ToList();
+    private async Task PrepareFileAsync(Song song, string temporary, bool decodeOnPlayback, CancellationToken token)
+    {
+        FileStream? original = null;
+        if (!decodeOnPlayback)
+        {
+            await _gate.WaitAsync(token);
+            try
+            {
+                string compressed = Destination(song.Id, true);
+                if (HasContent(compressed))
+                    original = Lease(compressed);
+                else if (song.FilePath is string path && IsManaged(path) && !IsCompressed(path) && Valid(path, song.Duration) &&
+                    !string.Equals(Path.GetFullPath(path), Destination(song.Id, false), StringComparison.OrdinalIgnoreCase))
+                    original = Lease(Path.GetFullPath(path));
+            }
+            finally { _gate.Release(); }
+        }
+
+        if (original != null)
+        {
+            await using (original)
+            {
+                if (IsCompressed(original.Name))
+                    await _normalizer.NormalizeCompressedAsync(original.Name, temporary, token);
+                else
+                    await _normalizer.NormalizeAsync(original.Name, temporary, token);
+            }
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(song.Link)) throw new IOException("Источник аудио недоступен.");
+        bool downloaded = decodeOnPlayback
+            ? await _downloader.DownloadCompressedAsync(song.Link, temporary, song.Name, token)
+            : await _downloader.DownloadAsync(song.Link, temporary, song.Name, token);
+        if (!downloaded) throw new IOException("Источник аудио недоступен.");
+    }
+
+    public async Task<Stream> OpenPlaybackStreamAsync(Stream source, CancellationToken token)
+    {
+        if (source is not FileStream file || !IsCompressed(file.Name)) return source;
+        return await BufferedPcmStream.OpenAsync(file, token);
+    }
+
+    private List<FileInfo> Files() => new DirectoryInfo(_root).EnumerateFiles()
+        .Where(f => (IsCompressed(f.Name) || f.Extension.Equals(".pcm", StringComparison.OrdinalIgnoreCase)) && IsManaged(f.FullName))
+        .ToList();
     public async Task<CacheReport> InspectAsync()
     {
         await _gate.WaitAsync();
@@ -150,8 +207,9 @@ public sealed class MediaCacheService : IMediaCache
             var files = Files();
             using var scope = _scopes.CreateScope(); var db = scope.ServiceProvider.GetRequiredService<DiscordMusicDBContext>();
             var songs = await db.Songs.AsNoTracking().Where(s => s.IsDownloaded).ToListAsync();
-            int invalid = files.Count(f => !Valid(f.FullName));
-            invalid += songs.Count(s => s.FilePath == null || !File.Exists(s.FilePath) || Valid(s.FilePath) && !Valid(s.FilePath, s.Duration));
+            int invalid = files.Count(f => !ValidCachedFile(f.FullName));
+            invalid += songs.Count(s => s.FilePath == null || !File.Exists(s.FilePath) ||
+                ValidCachedFile(s.FilePath) && !ValidCachedFile(s.FilePath, s.Duration));
             return new(files.Sum(f => f.Length), _limit, files.Count, invalid);
         }
         finally { _gate.Release(); }
@@ -168,7 +226,7 @@ public sealed class MediaCacheService : IMediaCache
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 lock (_leases) if (_leases.GetValueOrDefault(file.FullName) > 0) continue;
-                if (bytes <= _limit && file.LastWriteTimeUtc >= DateTime.UtcNow.AddDays(-_maxAgeDays) && Valid(file.FullName)) continue;
+                if (bytes <= _limit && file.LastWriteTimeUtc >= DateTime.UtcNow.AddDays(-_maxAgeDays) && ValidCachedFile(file.FullName)) continue;
                 long length = file.Length;
                 try { file.Delete(); } catch (IOException) { continue; }
                 bytes -= length;
@@ -188,7 +246,7 @@ public sealed class MediaCacheService : IMediaCache
             foreach (Song song in songs)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                if (song.FilePath != null && IsManaged(song.FilePath) && Valid(song.FilePath, song.Duration)) continue;
+                if (song.FilePath != null && IsManaged(song.FilePath) && ValidCachedFile(song.FilePath, song.Duration)) continue;
                 try { await using (await OpenAsync(song, cancellationToken)) { } repaired++; }
                 catch (OperationCanceledException) { throw; }
                 catch (Exception) { failed++; }

@@ -164,7 +164,14 @@ public sealed class MusicClientService : IAsyncDisposable
                 {
                     long? seek; PlaybackStatus status;
                     lock (_sync) { seek = _seek; _seek = null; status = _status; }
-                    if (seek.HasValue && pcm.CanSeek) { pcm.Position = Math.Clamp(seek.Value, 0, Math.Max(0, pcm.Length - 4)) / 4 * 4; lock (_sync) _position = pcm.Position; }
+                    if (seek.HasValue)
+                    {
+                        if (pcm is Kvasir.Media.BufferedPcmStream decoded)
+                            await decoded.SeekAsync(seek.Value, token);
+                        else if (pcm.CanSeek)
+                            pcm.Position = Math.Clamp(seek.Value, 0, Math.Max(0, pcm.Length - 4)) / 4 * 4;
+                        lock (_sync) _position = pcm.Position;
+                    }
                     int count = status == PlaybackStatus.Paused ? 0 : await pcm.ReadAtLeastAsync(buffer.AsMemory(), buffer.Length, throwOnEndOfStream: false, token);
                     if (count == 0 && status != PlaybackStatus.Paused) { completed = true; break; }
                     GuildMusicSettings settings = _settings;
