@@ -32,6 +32,7 @@ public partial class MainWindow : Window
         _viewModel.ProblemRaised += ShowProblemAsync;
         _viewModel.CommandSucceeded += (message, server) => Notifications.Show(message, NotificationKind.Success, server ?? UiText.Get("Done"));
         _viewModel.RequestToken = ShowTokenAsync;
+        InitializeUpdateChecks();
         Loaded += async (_, _) =>
         {
             try
@@ -60,6 +61,8 @@ public partial class MainWindow : Window
     {
         var settings = new SettingsWindow { Owner = this };
         settings.NotificationPositionChanged += position => Notifications.Placement = position;
+        settings.AutoCheckUpdatesChanged += SetAutomaticUpdateChecks;
+        settings.ShowAvailableRelease(_availableRelease);
         settings.ShowDialog();
         if (settings.OpenJournal) ShowJournal();
         if (settings.TokenChanged && await _viewModel.StopAsync()) await _viewModel.StartAsync();
@@ -76,15 +79,23 @@ public partial class MainWindow : Window
     {
         if (_canClose) return;
         e.Cancel = true;
-        if (_closing) return;
+        await CloseAfterStoppingAsync();
+    }
+
+    internal async Task<bool> CloseAfterStoppingAsync(Action? startHelper = null)
+    {
+        if (_closing) return false;
         _closing = true;
-        await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
-        if (await _viewModel.StopAsync())
+        try
         {
+            await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
+            if (!await _viewModel.StopAsync()) return false;
+            startHelper?.Invoke();
             _soundboardWindow?.Close();
             _viewModel.Dispose(); _canClose = true; Close();
+            return true;
         }
-        _closing = false;
+        finally { _closing = false; }
     }
 
     private void AddServer_Click(object sender, RoutedEventArgs e)
@@ -119,12 +130,12 @@ public partial class MainWindow : Window
         ((FrameworkElement)sender).ContextMenu = menu;
         return menu;
     }
-    private void AddAction(ContextMenu menu, string title, string action, string icon, bool enabled = true)
+    private void AddAction(ContextMenu menu, string title, string action, string icon)
     {
         menu.Items.Add(new MenuItem
         {
             Header = title, Icon = new SvgIcon { Kind = icon, Width = 16, Height = 16 },
-            Command = _viewModel.ActionCommand, CommandParameter = action, IsEnabled = enabled,
+            Command = _viewModel.ActionCommand, CommandParameter = action,
         });
     }
     private void QueueMenu_Opening(object sender, ContextMenuEventArgs e)
@@ -153,22 +164,45 @@ public partial class MainWindow : Window
         AddAction(menu, UiText.Get("LeaveVoiceChannel"), "disconnect", "Disconnect");
         menu.IsOpen = true;
     }
-    private void PlaylistMenu_Click(object sender, RoutedEventArgs e)
+    private void PlaylistTrackMenu_Opening(object sender, ContextMenuEventArgs e)
     {
-        var menu = Menu(sender);
-        bool playlist = _viewModel.SelectedPlaylist != null, song = _viewModel.SelectedSong != null;
-        var edit = new MenuItem { Header = UiText.Get("EditPlaylistAction"), Icon = new SvgIcon { Kind = "Tool", Width = 16, Height = 16 }, IsEnabled = playlist };
+        if (!_viewModel.GuildEnabled || _viewModel.SelectedPlaylist == null ||
+            sender is not DataGridRow { Item: TrackItem track, ContextMenu: { } menu } row)
+        {
+            e.Handled = true;
+            return;
+        }
+
+        row.IsSelected = true;
+        menu.Items.Clear();
+        AddAction(menu, UiText.Get("QueueTrackFromPlaylist"), "playlist-song-play", "Plus");
+        if (track.DownloadState == TrackDownloadState.Pending)
+            AddAction(menu, UiText.Get("RetryTrackDownload"), "playlist-retry-track", "Refresh");
+        menu.Items.Add(new Separator());
+        AddAction(menu, UiText.Get("MoveTrackUp"), "playlist-up", "Up");
+        AddAction(menu, UiText.Get("MoveTrackDown"), "playlist-down", "Down");
+        AddAction(menu, UiText.Get("RemoveFromPlaylist"), "playlist-remove", "Trash");
+    }
+
+    private void PlaylistRowMenu_Opening(object sender, ContextMenuEventArgs e)
+    {
+        if (!_viewModel.GuildEnabled || sender is not ListBoxItem { Content: PlaylistItem playlist, ContextMenu: { } menu } row)
+        {
+            e.Handled = true;
+            return;
+        }
+
+        row.IsSelected = true;
+        menu.Items.Clear();
+        var edit = new MenuItem { Header = UiText.Get("EditPlaylistAction"), Icon = new SvgIcon { Kind = "Tool", Width = 16, Height = 16 } };
         edit.Click += EditPlaylist_Click;
         menu.Items.Add(edit);
+        if (!playlist.IsLocal)
+            AddAction(menu, UiText.Get(playlist.Shared ? "MakePrivate" : "MakeShared"), "playlist-share", "Users");
         menu.Items.Add(new Separator());
-        AddAction(menu, UiText.Get("QueueTrackFromPlaylist"), "playlist-song-play", "Plus", song);
-        AddAction(menu, UiText.Get("MoveTrackUp"), "playlist-up", "Up", song);
-        AddAction(menu, UiText.Get("MoveTrackDown"), "playlist-down", "Down", song);
-        AddAction(menu, UiText.Get("RemoveFromPlaylist"), "playlist-remove", "Trash", song);
-        menu.Items.Add(new Separator());
-        AddAction(menu, _viewModel.SelectedPlaylist?.Shared == true ? UiText.Get("MakePrivate") : UiText.Get("MakeShared"), "playlist-share", "Users", playlist);
-        var delete = new MenuItem { Header = UiText.Get("DeletePlaylistAction"), Icon = new SvgIcon { Kind = "Trash", Width = 16, Height = 16 }, IsEnabled = playlist };
-        delete.Click += DeletePlaylist_Click; menu.Items.Add(delete); menu.IsOpen = true;
+        var delete = new MenuItem { Header = UiText.Get("DeletePlaylistAction"), Icon = new SvgIcon { Kind = "Trash", Width = 16, Height = 16 } };
+        delete.Click += DeletePlaylist_Click;
+        menu.Items.Add(delete);
     }
     private async void CreatePlaylist_Click(object sender, RoutedEventArgs e) => await ShowPlaylistDialogAsync(null);
     private async void EditPlaylist_Click(object sender, RoutedEventArgs e)
@@ -181,7 +215,7 @@ public partial class MainWindow : Window
         var server = _viewModel.SelectedTab;
         var dialog = new PlaylistDialog(playlist?.Name) { Owner = this };
         if (dialog.ShowDialog() == true && ReferenceEquals(server, _viewModel.SelectedTab))
-            await _viewModel.EditPlaylistAsync(playlist, dialog.Input, dialog.Shared);
+            await _viewModel.EditPlaylistAsync(playlist, dialog.Input, dialog.Shared, dialog.IsLocal);
     }
     private void DeletePlaylist_Click(object sender, RoutedEventArgs e)
     {
@@ -199,10 +233,6 @@ public partial class MainWindow : Window
     private void Query_KeyDown(object sender, KeyEventArgs e)
     {
         if (e.Key == Key.Enter) { _viewModel.ActionCommand.Execute("enqueue"); e.Handled = true; }
-    }
-    private void Playlist_DoubleClick(object sender, MouseButtonEventArgs e)
-    {
-        if (_viewModel.SelectedSong != null && e.OriginalSource is DependencyObject source && FindRow(source) != null) _viewModel.ActionCommand.Execute("playlist-song-play");
     }
     private void History_DoubleClick(object sender, MouseButtonEventArgs e)
     {

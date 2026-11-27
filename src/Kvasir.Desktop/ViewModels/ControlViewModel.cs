@@ -114,6 +114,7 @@ public sealed partial class ControlViewModel : INotifyPropertyChanged, IDisposab
     public string RepeatText => _repeat switch { "track" => UiText.Get("RepeatTrack"), "queue" => UiText.Get("RepeatQueue"), _ => UiText.Get("RepeatOff") };
     public string CacheText { get; private set; } = UiText.Get("CacheCheckHint");
     private ImportItem? _import;
+    private string? _reportedLocalImport;
     public bool ImportIndeterminate => _import is { Finished: false, Total: <= 0 };
     public string ImportText
     {
@@ -357,7 +358,7 @@ public sealed partial class ControlViewModel : INotifyPropertyChanged, IDisposab
             try { _audioClient.Dispose(); } finally { _audioGate.Release(); }
             _client.Dispose(); _session.Dispose(); _session = new();
             _fatalReported = false; _problems.Clear(); _errorTimer.Stop();
-            _reportedLogErrors.Clear();
+            _reportedLogErrors.Clear(); _reportedLocalImport = null;
             _process.Start(); Status = UiText.Get("Connecting"); SetSoundboardStatus("");
             AppendLog(UiText.Get("BotProcessStarted"));
         }
@@ -430,7 +431,7 @@ public sealed partial class ControlViewModel : INotifyPropertyChanged, IDisposab
     private ControlRequest Request(string action) => new(_process.Session, action, SelectedGuild?.Id ?? 0,
         SelectedChannel?.Id, SelectedEntry?.Id, SelectedPlaylist?.Id, SelectedSong?.Id);
 
-    private sealed record PlaylistEdit(int? Id, string Input, bool Shared, bool IsLink)
+    private sealed record PlaylistEdit(int? Id, string Input, bool Shared, bool IsLink, bool IsLocal)
     {
         public string Action => Id == null ? "playlist-create" : IsLink ? "playlist-import" : "playlist-rename";
     }
@@ -446,11 +447,11 @@ public sealed partial class ControlViewModel : INotifyPropertyChanged, IDisposab
     public Task CopyPlaylistTrackAsync(int songId, int destinationPlaylistId) =>
         GuildEnabled && SelectedPlaylist != null ? ExecuteAsync(new PlaylistTrackEdit(songId, DestinationPlaylistId: destinationPlaylistId)) : Task.CompletedTask;
 
-    public Task EditPlaylistAsync(PlaylistItem? playlist, string input, bool shared)
+    public Task EditPlaylistAsync(PlaylistItem? playlist, string input, bool shared, bool local = false)
     {
         if (!GuildEnabled) return Task.CompletedTask;
         string? link = PlaylistInput.GetLink(input);
-        return ExecuteAsync(new PlaylistEdit(playlist?.Id, link ?? input, shared, link != null));
+        return ExecuteAsync(new PlaylistEdit(playlist?.Id, link ?? input, shared, link != null, playlist == null && local));
     }
 
     private async Task ExecuteAsync(object? parameter)
@@ -481,6 +482,7 @@ public sealed partial class ControlViewModel : INotifyPropertyChanged, IDisposab
                     PlaylistId = edit.Id,
                     Value = edit.Input,
                     Number = edit.Shared ? 1 : 0,
+                    CreateLocalPlaylist = edit.IsLocal,
                 };
             if (parameter is PlaylistTrackEdit track)
                 request = request with
@@ -583,7 +585,7 @@ public sealed partial class ControlViewModel : INotifyPropertyChanged, IDisposab
                 else if (!batch && !string.IsNullOrWhiteSpace(responseMessage) &&
                     action is "enqueue" or "history-play" or "playlist-play" or "playlist-song-play" or
                         "playlist-create" or "playlist-rename" or "playlist-share" or "playlist-delete" or
-                        "playlist-add-current" or "playlist-remove" or "playlist-import" or "playlist-move-track" or "playlist-copy-track" or
+                        "playlist-add-current" or "playlist-remove" or "playlist-import" or "playlist-move-track" or "playlist-copy-track" or "playlist-retry-track" or
                         "queue-undo" or "settings" or "sound-import" or "sound-remove")
                     CommandSucceeded?.Invoke(responseMessage, tab?.Name);
                 if (import != null)
@@ -640,25 +642,10 @@ public sealed partial class ControlViewModel : INotifyPropertyChanged, IDisposab
                 NotifyProblem(ProblemCatalog.Describe(failure, "playback"));
             }
             if (string.IsNullOrWhiteSpace(failure)) tab.ReportedError = null;
-            if (state.Import is { Finished: true, Failures.Length: > 0 } import)
-            {
-                string incident = string.Join("\n", import.Failures);
-                if (tab.ReportedImport != incident)
-                {
-                    tab.ReportedImport = incident;
-                    string detail = UiText.Format("ImportFailuresFormat", tab.Name, import.Completed, import.Total, import.Failures.Length);
-                    AppendLog(detail + " " + import.Detail);
-                    if (import.Total == 0 && import.Detail != null)
-                        NotifyProblem(ProblemCatalog.Describe(import.Detail, import.ErrorCode));
-                    else
-                    {
-                        detail += "\n" + string.Join("\n", import.Failures.Take(3));
-                        if (import.Detail != null) detail += "\n" + ProblemCatalog.Describe(import.Detail, import.ErrorCode).Cause;
-                        NotifyProblem(ProblemCatalog.Describe(detail, "import-partial"));
-                    }
-                }
-            }
-            else if (state.Import is { Finished: false }) tab.ReportedImport = null;
+            tab.ReportedImport = ReportImportFailure(state.Import, tab.ReportedImport, tab.Name);
+            if (tab == SelectedTab)
+                _reportedLocalImport = ReportImportFailure(state.LocalImport, _reportedLocalImport,
+                    state.Playlists.FirstOrDefault(p => p.Id == state.LocalImport?.PlaylistId)?.Name ?? UiText.Get("LocalPlaylist"));
             if (tab == SelectedTab && requestedPlaylist == SelectedPlaylist?.Id)
                 Apply(state, SelectedChannel?.Id, SelectedPlaylist?.Id, SelectedEntry?.Id, SelectedSong?.Id, SelectedHistory?.Id);
         }
@@ -672,6 +659,25 @@ public sealed partial class ControlViewModel : INotifyPropertyChanged, IDisposab
             CacheText = UiText.Format("CacheSummaryFormat", cache.Bytes / 1048576d, cache.LimitBytes / 1048576d,
                 cache.Files, cache.InvalidFiles, cache.Repaired, cache.Removed, cache.FailedRepairs);
         Raise(nameof(CacheText));
+    }
+
+    private string? ReportImportFailure(ImportItem? import, string? previous, string source)
+    {
+        if (import is not { Finished: true, Failures.Length: > 0 }) return null;
+        string incident = $"{import.PlaylistId}\n{string.Join("\n", import.Failures)}";
+        if (previous == incident) return incident;
+
+        string detail = UiText.Format("ImportFailuresFormat", source, import.Completed, import.Total, import.Failures.Length);
+        AppendLog(detail + " " + import.Detail);
+        if (import.Total == 0 && import.Detail != null)
+            NotifyProblem(ProblemCatalog.Describe(import.Detail, import.ErrorCode));
+        else
+        {
+            detail += "\n" + string.Join("\n", import.Failures.Take(3));
+            if (import.Detail != null) detail += "\n" + ProblemCatalog.Describe(import.Detail, import.ErrorCode).Cause;
+            NotifyProblem(ProblemCatalog.Describe(detail, "import-partial"));
+        }
+        return incident;
     }
 
     private void Apply(ControlState state, ulong? channel, int? playlist, Guid? entry, int? song, int? history, bool isLive = true)
@@ -710,7 +716,8 @@ public sealed partial class ControlViewModel : INotifyPropertyChanged, IDisposab
             {
                 EffectsVolume = state.Mix.EffectsVolume; DuckMusic = state.Mix.DuckMusic;
             }
-            SetImport(state.Import is { PlaylistId: { } id } && id != SelectedPlaylist?.Id ? null : state.Import);
+            var import = SelectedPlaylist?.IsLocal == true ? state.LocalImport : state.Import;
+            SetImport(import is { PlaylistId: { } id } && id != SelectedPlaylist?.Id ? null : import);
         }
         finally { _applying = false; RaisePlayer(); }
     }

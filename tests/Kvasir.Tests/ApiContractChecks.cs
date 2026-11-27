@@ -34,6 +34,11 @@ internal static partial class Program
         IHost host = CS_Discord_Bot.Program.CreateHostBuilder([], path).Build();
         await using var lifetime = (IAsyncDisposable)host;
         CS_Discord_Bot.Program.RegisterCommands(host);
+        var commands = host.Services.GetRequiredService<NetCord.Services.ApplicationCommands.ApplicationCommandService<NetCord.Services.ApplicationCommands.ApplicationCommandContext>>();
+        var help = CommonCommands.HelpPages(commands).ToArray();
+        Check(help.All(page => page.Length <= 2000) && help.SelectMany(page => page.Split('\n')).Select(line => line.Split(' ')[0])
+            .SequenceEqual(commands.GetCommands().Where(c => c.Register && c.Type == ApplicationCommandType.ChatInput)
+                .Select(c => "/" + c.Name).Order(StringComparer.Ordinal)), "Help lists each registered slash command in order");
         Check(host.Services.GetRequiredService<IBotConnector>() is NetCordBotConnector, "The production host resolves the Discord connector after registering command modules");
         var gateway = host.Services.GetRequiredService<GatewayClient>();
         Check(gateway.Token.Id == 44 && gateway.Cache.User == null, "The production host configures the expected Discord identity before connecting");
@@ -42,7 +47,7 @@ internal static partial class Program
     private static async Task TestDesktopPlaylistImportAsync(ServiceProvider provider, string root)
     {
         using GatewayClient gateway = new(new BotToken("NDQ.fixture.fixture"), new());
-        var connector = new FakeConnector { Guilds = [new(1, "One")] };
+        var connector = new FakeConnector { Guilds = [new(1, "One"), new(2, "Two")] };
         await using var guilds = new GuildService(provider.GetRequiredService<IServiceScopeFactory>(), connector);
         var library = provider.GetRequiredService<IMusicLibrary>();
         var mediaActivity = new MediaActivity();
@@ -122,6 +127,67 @@ internal static partial class Program
                   (await library.CopyTrackAsync(1, guest, id, guestPlaylist.Id, order[1])).Success &&
                   !(await library.CopyTrackAsync(1, guest, destination, guestPlaylist.Id, order[0])).Success,
                 "Copy requires visibility of the source and edit rights on the destination");
+
+            var local = await Send(new("fixture", "playlist-create", 1,
+                Value: "https://open.spotify.com/album/fixture") { CreateLocalPlaylist = true });
+            int localId = local.State?.PlaylistId ?? 0;
+            Check(local.Success && local.State?.Playlists.FirstOrDefault() is { IsLocal: true, Shared: false } item && item.Id == localId,
+                "A local playlist created from a link is listed ahead of server playlists");
+            await Until(() => !imports.IsImportRunning(0, connector.CurrentUserId));
+            var otherRequest = new ControlRequest("fixture", GuildId: 2, PlaylistId: localId);
+            var other = (await Send(otherRequest)).State;
+            Check(other is { PlaylistId: var selected, LocalImport: { Finished: true, Completed: 3 }, Songs.Length: 3 } &&
+                  selected == localId && other.Playlists.Single().Id == localId,
+                "The same local playlist, track data and import report are available from another server");
+
+            var discordManager = new MusicActor(connector.CurrentUserId, null, IsManager: true);
+            Check((await library.ListAsync(1, discordManager)).All(p => p.Id != localId) &&
+                  await library.GetAsync(2, discordManager, localId) == null &&
+                  !(await library.EditAsync(1, discordManager, localId, "delete")).Success,
+                "Discord callers cannot discover or change local playlists even with manager rights");
+            Check(!(await Send(otherRequest with { Action = "playlist-share" })).Success,
+                "The local playlist cannot be shared on the server");
+            var renamed = await Send(otherRequest with { Action = "playlist-rename", Value = "My playlist" });
+            Check(renamed.Success && (await Send(request with { PlaylistId = localId })).State?.Playlists[0].Name == "My playlist",
+                "Renaming from another server updates the original local playlist");
+            var copyFromLocal = await Send(copy with { PlaylistId = localId, SongId = order[2] });
+            Check(copyFromLocal is { Success: true, MessageKey: "PlaylistTrackCopied" }, "Local tracks can be copied into a server playlist");
+            var removed = await Send(otherRequest with { Action = "playlist-delete" });
+            Check(removed.Success && (await Send(request)).State?.Playlists.All(p => p.Id != localId) == true,
+                "Deleting from another server removes the local playlist everywhere");
+
+            var author = new MusicActor(connector.CurrentUserId, null) { CanAccessLocalPlaylists = true };
+            Check((await library.EditAsync(1, author, destination, "add", songId: 27)).Success, "A pending track is available to retry");
+            var retryStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var finishRetry = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            int downloads = 0;
+            downloader.BeforeDownload = (link, token) =>
+            {
+                if (link != "test:27") return Task.CompletedTask;
+                Interlocked.Increment(ref downloads);
+                retryStarted.TrySetResult();
+                return finishRetry.Task.WaitAsync(token);
+            };
+            var retry = request with { Action = "playlist-retry-track", PlaylistId = destination, SongId = 27 };
+            try
+            {
+                Check((await Send(retry with { SongId = int.MaxValue })) is { Success: false, ErrorCode: "input", MessageKey: "PlaylistTrackUnavailable" },
+                    "Only a member of the selected playlist can be retried");
+                Check((await Send(retry)) is { Success: true, MessageKey: "TrackDownloadQueued" },
+                    "A retry schedules just the selected track without waiting for its audio");
+                await retryStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                var repeated = (await Send(retry)).State!;
+                Check(repeated.Queue.Length == 0 && repeated.Songs.Single(song => song.Id == 27).DownloadState == TrackDownloadState.Downloading,
+                    "Retry prepares audio without queuing playback and reports an in-progress download");
+            }
+            finally { finishRetry.TrySetResult(); }
+            using var retryScope = provider.CreateScope();
+            var retryDb = retryScope.ServiceProvider.GetRequiredService<DiscordMusicDBContext>();
+            await Until(() => retryDb.Songs.Any(song => song.Id == 27 && song.IsDownloaded));
+            var ready = await Send(retry);
+            Check(ready.MessageKey == "TrackAlreadyDownloaded" && downloads == 1 &&
+                  ready.State!.Songs.Single(song => song.Id == 27).DownloadState == TrackDownloadState.Downloaded,
+                "A repeated retry deduplicates downloads and leaves the downloaded track ready");
         }
         finally
         {

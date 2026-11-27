@@ -18,6 +18,7 @@
     <AllowedReferenceRelatedFileExtensions>.xml</AllowedReferenceRelatedFileExtensions>
   </PropertyGroup>
   <ItemGroup Condition="'$(StandaloneBotDirectory)' != ''">
+    <AssemblyMetadata Include="KvasirStandalone" Value="true" />
     <Content Include="$(StandaloneBotDirectory)\**\*" Exclude="$(StandaloneBotDirectory)\**\*.pdb;$(StandaloneBotDirectory)\appdata\ffplay.exe;$(StandaloneBotDirectory)\appdata\ffprobe.exe"
              Link="bot\%(RecursiveDir)%(Filename)%(Extension)" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
@@ -32,6 +33,7 @@
     <Resource Include="Assets\Icons\*.svg" />
     <EmbeddedResource Include="Localization\*.json" LogicalName="Kvasir.Localization.%(Filename)%(Extension)" />
     <EmbeddedResource Include="..\..\docs\release-notes.json" LogicalName="Kvasir.ReleaseNotes.json" />
+    <EmbeddedResource Include="Services\Maintenance.ps1" LogicalName="Kvasir.Maintenance.ps1" />
     <Content Include="..\..\docs\DESKTOP.md" Link="DESKTOP.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="..\..\docs\DESKTOP-VALIDATION.md" Link="DESKTOP-VALIDATION.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="..\..\vendor\Tessera.WpfStyles\licenses\*.txt" Link="licenses\%(Filename)%(Extension)"

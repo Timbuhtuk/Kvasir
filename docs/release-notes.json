@@ -1,6 +1,31 @@
 {
   "releases": [
     {
+      "version": "1.3.0",
+      "title": {
+        "ru": "Локальные плейлисты, обновления и настройки",
+        "en": "Local playlists, updates, and settings"
+      },
+      "notes": {
+        "ru": [
+          "Локальные плейлисты доступны во всех вкладках серверов в пульте.",
+          "В настройках пульта можно проверить обновления GitHub. Версия из одного EXE поддерживает установку обновлений и удаление приложения.",
+          "Настройки пульта позволяют изменить параметры бота и перенести папку данных.",
+          "Команда /help в Discord показывает список зарегистрированных команд и их описания.",
+          "Диагностика обнаруживает повреждённые сжатые аудиофайлы, а восстановление кэша скачивает их заново. Состояние трека обновляется сразу после завершения загрузки.",
+          "Если новая версия не смогла открыть окно, автообновление восстанавливает предыдущий EXE."
+        ],
+        "en": [
+          "Local playlists are available across all server tabs in the desktop app.",
+          "Check for GitHub updates in desktop settings. The standalone EXE can install updates and uninstall the app.",
+          "Use desktop settings to change bot options and move the data folder.",
+          "The Discord /help command lists registered commands and their descriptions.",
+          "Diagnostics detect damaged compressed audio and cache repair downloads it again. Track status updates as soon as the download finishes.",
+          "The updater restores the previous EXE if the new version fails to open its window."
+        ]
+      }
+    },
+    {
       "version": "1.2.0",
       "title": {
         "ru": "Патчноуты и два режима аудиокэша",

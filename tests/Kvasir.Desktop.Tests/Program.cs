@@ -39,16 +39,10 @@ internal static class Program
         try
         {
             ConfigurationChecks(root);
+            DataMigrationChecks(root);
             ProblemChecks();
             PipeChecksAsync().GetAwaiter().GetResult();
-            _ = new System.Windows.Application
-            {
-                ShutdownMode = ShutdownMode.OnExplicitShutdown,
-                Resources = new ResourceDictionary
-                {
-                    Source = new Uri("pack://application:,,,/Kvasir.Desktop;component/AppResources.xaml")
-                }
-            };
+            var app = new App { ShutdownMode = ShutdownMode.OnExplicitShutdown }; app.InitializeComponent();
             ThemeChecks();
             AppearanceChecks(root);
             ReleaseNotesChecks(root);
@@ -139,6 +133,19 @@ internal static class Program
                     "CPU mode persists in the bot configuration alongside existing settings");
             audioMode.SelectedValue = "disk";
             Check(!botConfig.ReadDecodeOnPlayback(), "Switching back saves disk mode");
+
+            var cache = (TextBox)window.FindName("CacheLimitBox");
+            var owner = (TextBox)window.FindName("OwnerIdBox");
+            var save = typeof(SettingsWindow).GetMethod("SaveParameters_Click", BindingFlags.NonPublic | BindingFlags.Instance)!;
+            Check(cache.Text == "512", "Bot settings show the existing cache limit");
+            cache.Text = "1";
+            save.Invoke(window, [window, new RoutedEventArgs()]);
+            Check(botConfig.ReadSettings().CacheLimitMb == 512, "Invalid cache limit leaves configuration intact");
+            owner.Text = "42";
+            cache.Text = "768";
+            ((ComboBox)window.FindName("LogLevelBox")).SelectedItem = "Warning";
+            save.Invoke(window, [window, new RoutedEventArgs()]);
+            Check(botConfig.ReadSettings() is { OwnerId: "42", CacheLimitMb: 768, LogLevel: "Warning" }, "The form saves bot settings together");
 
             var languages = (ComboBox)window.FindName("LanguageBox");
             languages.SelectedValue = "en";
@@ -272,6 +279,42 @@ internal static class Program
         Check(Directory.GetFiles(root, "*.tmp").Length == 0, "No secret-bearing temporary file left behind");
     }
 
+    private static void DataMigrationChecks(string root)
+    {
+        string source = Path.Combine(root, "Kvasir"), destination = Path.Combine(root, "new", "Kvasir");
+        Directory.CreateDirectory(Path.Combine(source, "appdata"));
+        Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+        var location = new DataLocation(source);
+        var progress = new Progress<int>();
+        string file = Path.Combine(source, "configuration.json");
+        File.WriteAllText(file, JsonSerializer.Serialize(new { tokens = new[] { "fixture" }, music_client = new
+            { music_folder = Path.Combine(source, "music"), preferences_file = "appdata/prefs.json" }, custom = 12 }));
+        File.WriteAllText(Path.Combine(source, "appdata", "fixture"), "contents");
+        using (location.OpenSession(false))
+        using (location.OpenSession(false))
+        {
+            try { DataDirectoryMigration.Move(location, source, destination, progress); Check(false, "Moved active data"); }
+            catch (IOException) { Check(location.Resolve() == source && !Directory.Exists(destination), "Active sessions prevent migration"); }
+        }
+        Directory.CreateDirectory(destination);
+        try { DataDirectoryMigration.Move(location, source, destination, progress); Check(false, "Overwrote destination"); }
+        catch (IOException) { Check(File.Exists(file), "An existing destination is left alone"); }
+        Directory.Delete(destination);
+        // A malformed source fails after copying. Neither the active pointer nor the destination may change.
+        string original = File.ReadAllText(file);
+        File.WriteAllText(file, "{");
+        try { DataDirectoryMigration.Move(location, source, destination, progress); Check(false, "Migrated malformed configuration"); }
+        catch (JsonException) { Check(location.Resolve() == source && !Directory.Exists(destination), "Failed migration keeps the source active"); }
+        File.WriteAllText(file, original);
+        Check(DataDirectoryMigration.Move(location, source, destination, progress) && location.Resolve() == destination &&
+            !Directory.Exists(source) && File.ReadAllText(Path.Combine(destination, "appdata", "fixture")) == "contents", "Migration moves nested data and switches the active root");
+        var config = new BotConfiguration(Path.Combine(destination, "configuration.json")).Read();
+        Check(config["music_client"]!["music_folder"]!.GetValue<string>() == Path.Combine(destination, "music") &&
+            config["music_client"]!["preferences_file"]!.GetValue<string>() == "appdata/prefs.json" &&
+            config["tokens"]![0]!.GetValue<string>() == "fixture" && config["custom"]!.GetValue<int>() == 12, "Migration rebases only local absolute paths");
+        Check(DataDirectoryMigration.Move(location, destination, source, progress) && location.Resolve() == source, "Data can be moved back to its default location");
+    }
+
     private static void ProblemChecks()
     {
         (string Text, string Code, ProblemAction Action)[] cases =
@@ -338,6 +381,12 @@ internal static class Program
         var create = new PlaylistDialog();
         var input = (TextBox)create.FindName("InputBox");
         var submit = (Button)create.FindName("SubmitButton");
+        var scope = (ComboBox)create.FindName("ScopeBox");
+        Check(!create.IsLocal && !create.Shared, "Playlist creation defaults to the private server scope");
+        scope.SelectedValue = "shared";
+        Check(create.Shared && !create.IsLocal, "Shared remains a server scope");
+        scope.SelectedValue = "local";
+        Check(create.IsLocal && !create.Shared, "The local scope is distinct from shared");
         Check(!submit.IsEnabled, "A new playlist requires a name");
         input.Text = "  Подборка  ";
         Check(submit.IsEnabled && Equals(submit.Content, UiText.Get("Create")) && create.Input == "Подборка",
@@ -349,6 +398,7 @@ internal static class Program
         create.Close();
 
         var edit = new PlaylistDialog("Подборка");
+        Check(((StackPanel)edit.FindName("ScopeFields")).Visibility == Visibility.Collapsed, "Editing keeps the existing playlist scope");
         input = (TextBox)edit.FindName("InputBox");
         submit = (Button)edit.FindName("SubmitButton");
         Check(input.Text == "Подборка" && !submit.IsEnabled, "Editing starts with the selected playlist name");

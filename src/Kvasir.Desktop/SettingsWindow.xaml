@@ -162,15 +162,52 @@
                     <ComboBoxItem Tag="cpu" Content="{loc:Translate AudioConversionCpu}" />
                 </ComboBox>
                 <TextBlock Text="{loc:Translate AudioConversionHint}" Style="{StaticResource Ts.Hint}" Margin="0,0,0,12" />
-                <TextBlock Text="{loc:Translate BotConfigurationHint}" Style="{StaticResource Ts.Hint}" />
-                <TextBox x:Name="ConfigurationPathBox" IsReadOnly="True" TextWrapping="Wrap" Margin="0,8,0,12"
-                         AutomationProperties.Name="{loc:Translate BotConfigurationFile}" />
+                <Expander Header="{loc:Translate BotParameters}" Margin="0,0,0,12" Foreground="{DynamicResource Ts.Text}">
+                    <StackPanel x:Name="BotParametersForm" Margin="12,4,0,4">
+                        <TextBlock Text="{loc:Translate BotOwnerId}" Margin="0,8,0,3" />
+                        <TextBox x:Name="OwnerIdBox" AutomationProperties.Name="{loc:Translate BotOwnerId}" />
+                        <TextBlock Text="{loc:Translate CacheLimitMb}" Margin="0,8,0,3" />
+                        <TextBox x:Name="CacheLimitBox" AutomationProperties.Name="{loc:Translate CacheLimitMb}" />
+                        <TextBlock Text="{loc:Translate CacheAgeDays}" Margin="0,8,0,3" />
+                        <TextBox x:Name="CacheAgeBox" AutomationProperties.Name="{loc:Translate CacheAgeDays}" />
+                        <CheckBox x:Name="SpotifyBox" Content="{loc:Translate SpotifyEnabled}" Style="{StaticResource Ts.CompactSwitchBox}" Margin="0,8,0,0" />
+                        <TextBlock Text="{loc:Translate SpotifyClientId}" Margin="0,8,0,3" />
+                        <TextBox x:Name="SpotifyIdBox" AutomationProperties.Name="{loc:Translate SpotifyClientId}" />
+                        <TextBlock Text="{loc:Translate SpotifyClientSecret}" Margin="0,8,0,3" />
+                        <PasswordBox x:Name="SpotifySecretBox" AutomationProperties.Name="{loc:Translate SpotifyClientSecret}" />
+                        <TextBlock Text="{loc:Translate BotLogLevel}" Margin="0,8,0,3" />
+                        <ComboBox x:Name="LogLevelBox" AutomationProperties.Name="{loc:Translate BotLogLevel}" />
+                        <TextBlock Text="{loc:Translate DatabaseLogLevel}" Margin="0,8,0,3" />
+                        <ComboBox x:Name="DbLogLevelBox" AutomationProperties.Name="{loc:Translate DatabaseLogLevel}" />
+                        <CheckBox x:Name="FileLoggingBox" Content="{loc:Translate FileLogging}" Style="{StaticResource Ts.CompactSwitchBox}" Margin="0,8,0,0" />
+                        <CheckBox x:Name="ConsoleLoggingBox" Content="{loc:Translate ConsoleLogging}" Style="{StaticResource Ts.CompactSwitchBox}" Margin="0,8,0,0" />
+                        <Button Content="{loc:Translate SaveBotParameters}" Click="SaveParameters_Click" HorizontalAlignment="Left" Margin="0,12,0,0" />
+                        <TextBlock x:Name="ParametersStatus" Style="{StaticResource Ts.Hint}" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite" />
+                    </StackPanel>
+                </Expander>
+                <Button Content="{loc:Translate ReplaceToken}" Click="Token_Click" HorizontalAlignment="Left" />
+                <Separator Margin="0,12,0,16" />
+                <TextBlock Text="{loc:Translate DataFolder}" Style="{StaticResource Ts.CardTitleText}" Margin="0,0,0,8" />
                 <WrapPanel>
-                    <Button Content="{loc:Translate ReplaceToken}" Click="Token_Click" Style="{StaticResource ActionButton}" />
-                    <Button Content="{loc:Translate OpenConfiguration}" Click="OpenConfiguration_Click" Style="{StaticResource ActionButton}" />
                     <Button Content="{loc:Translate OpenDataFolder}" Click="OpenDataFolder_Click" Style="{StaticResource ActionButton}" />
-                    <Button Content="{loc:Translate ReleaseNotesTitle}" Click="ReleaseNotes_Click" Style="{StaticResource ActionButton}" />
+                    <Button x:Name="MoveDataButton" Content="{loc:Translate MoveData}" Click="MoveData_Click" Style="{StaticResource ActionButton}" />
                 </WrapPanel>
+                <Separator Margin="0,8,0,16" />
+                <TextBlock Text="{loc:Translate UpdatesAndUninstall}" Style="{StaticResource Ts.CardTitleText}" Margin="0,0,0,8" />
+                <TextBlock x:Name="InstalledVersion" Style="{StaticResource Ts.Hint}" />
+                <CheckBox x:Name="AutoCheckUpdatesBox" Content="{loc:Translate AutoCheckUpdates}" Click="AutoCheckUpdates_Click"
+                          Style="{StaticResource Ts.CompactSwitchBox}" Margin="0,8,0,12" />
+                <WrapPanel>
+                    <Button x:Name="UpdateButton" Content="{loc:Translate CheckForUpdates}" Click="Update_Click" Style="{StaticResource ActionButton}" />
+                    <Button Content="{loc:Translate ReleaseNotesTitle}" Click="ReleaseNotes_Click" Style="{StaticResource ActionButton}" />
+                    <Button x:Name="UninstallButton" Content="{loc:Translate UninstallKvasir}" Click="Uninstall_Click" Style="{StaticResource ActionButton}" />
+                </WrapPanel>
+                <TextBlock x:Name="StandaloneHint" Text="{loc:Translate MaintenanceStandaloneOnly}" Style="{StaticResource Ts.Hint}"
+                           TextWrapping="Wrap" Margin="0,0,0,6" />
+                <ProgressBar x:Name="MaintenanceProgress" Height="5" Visibility="Collapsed" Style="{StaticResource Ts.ProgressBar}"
+                             AutomationProperties.Name="{loc:Translate UpdateProgress}" Margin="0,4,0,6" />
+                <TextBlock x:Name="MaintenanceStatus" Foreground="{DynamicResource Ts.TextSecondary}" TextWrapping="Wrap"
+                           AutomationProperties.LiveSetting="Polite" />
             </StackPanel>
         </ScrollViewer>
 

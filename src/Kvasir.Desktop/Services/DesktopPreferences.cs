@@ -13,6 +13,7 @@ public sealed record DesktopPreferences
     public TesseraTheme Theme { get; init; } = TesseraTheme.Dark;
     public string Language { get; init; } = "ru";
     public NotificationPlacement NotificationPosition { get; init; } = NotificationPlacement.TopRight;
+    public bool AutoCheckUpdates { get; init; } = true;
 
     public static DesktopPreferences Load(string? path = null)
     {
@@ -26,7 +27,8 @@ public sealed record DesktopPreferences
             {
                 Theme = ReadEnum(settings, "theme", TesseraTheme.Dark),
                 Language = ReadString(settings, "language") == "en" ? "en" : "ru",
-                NotificationPosition = ReadEnum(settings, "notificationPosition", NotificationPlacement.TopRight)
+                NotificationPosition = ReadEnum(settings, "notificationPosition", NotificationPlacement.TopRight),
+                AutoCheckUpdates = !settings.TryGetProperty("autoCheckUpdates", out var autoCheck) || autoCheck.ValueKind != JsonValueKind.False
             };
         }
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
@@ -46,7 +48,8 @@ public sealed record DesktopPreferences
             {
                 theme = Theme.ToString(),
                 language = Language,
-                notificationPosition = NotificationPosition.ToString()
+                notificationPosition = NotificationPosition.ToString(),
+                autoCheckUpdates = AutoCheckUpdates
             }, JsonOptions));
             File.Move(temporary, path, overwrite: true);
         }

@@ -10,6 +10,7 @@ public sealed record ControlRequest(string Session, string Action = "snapshot", 
     CompanySettings? Settings = null, Guid? EffectId = null)
 {
     public string? ImportQuery { get; init; }
+    public bool CreateLocalPlaylist { get; init; }
     public int? AnchorSongId { get; init; }
     public bool InsertAfter { get; init; }
     public int? DestinationPlaylistId { get; init; }
@@ -35,6 +36,7 @@ public sealed record QueueItem(Guid Id, TrackItem Track, ulong RequestedBy)
 }
 public sealed record PlaylistItem(int Id, string Name, ulong AuthorId, bool Shared, int Count)
 {
+    public bool IsLocal { get; init; }
     public override string ToString() => Name;
 }
 public sealed record CheckItem(string Name, bool Healthy, string Detail);
@@ -68,6 +70,7 @@ public sealed record ControlState
     public TrackItem[] Songs { get; init; } = [];
     public CompanySettings? Settings { get; init; }
     public ImportItem? Import { get; init; }
+    public ImportItem? LocalImport { get; init; }
     public CheckItem[] Checks { get; init; } = [];
     public CacheItem? Cache { get; init; }
     public SoundEffectItem[] Effects { get; init; } = [];

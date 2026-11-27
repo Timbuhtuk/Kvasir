@@ -15,7 +15,7 @@ public interface IMusicLibrary
 {
     Task<IReadOnlyList<Playlist>> ListAsync(ulong guildId, MusicActor actor, string search = "");
     Task<Playlist?> GetAsync(ulong guildId, MusicActor actor, int playlistId);
-    Task<Playlist> CreateAsync(ulong guildId, MusicActor actor, string name, bool shared);
+    Task<Playlist> CreateAsync(ulong guildId, MusicActor actor, string name, bool shared, bool local = false);
     Task<OperationResult> EditAsync(ulong guildId, MusicActor actor, int playlistId, string action, string? value = null, int? songId = null);
     Task<OperationResult> MoveTrackAsync(ulong guildId, MusicActor actor, int playlistId, int songId, int anchorSongId, bool after);
     Task<OperationResult> CopyTrackAsync(ulong guildId, MusicActor actor, int sourcePlaylistId, int destinationPlaylistId, int songId);

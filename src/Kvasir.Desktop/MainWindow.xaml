@@ -94,6 +94,32 @@
             <Setter Property="Height" Value="44" />
             <Setter Property="Background" Value="{DynamicResource Ts.Raised}" />
         </Style>
+        <Style x:Key="PlaylistPlayButton" TargetType="Button" BasedOn="{StaticResource IconButton}">
+            <Setter Property="Width" Value="46" />
+            <Setter Property="Height" Value="46" />
+            <Setter Property="Background" Value="{DynamicResource Ts.Raised}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource Ts.Border}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Frame" CornerRadius="23" Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Frame" Property="Background" Value="{DynamicResource Ts.Hover}" /></Trigger>
+                            <Trigger Property="IsPressed" Value="True"><Setter TargetName="Frame" Property="Background" Value="{DynamicResource Ts.Canvas}" /></Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Frame" Property="BorderBrush" Value="{DynamicResource Ts.Focus}" /></Trigger>
+                            <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Frame" Property="Opacity" Value="0.4" /></Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding SelectedPlaylist}" Value="{x:Null}"><Setter Property="IsEnabled" Value="False" /></DataTrigger>
+            </Style.Triggers>
+        </Style>
         <Style x:Key="PlaybackPanelButtonStyle" TargetType="ToggleButton" BasedOn="{StaticResource {x:Type ToggleButton}}">
             <Setter Property="Width" Value="36" /><Setter Property="Height" Value="36" />
             <Setter Property="MinHeight" Value="0" /><Setter Property="Padding" Value="6" />
@@ -199,6 +225,10 @@
         <Style x:Key="PlaylistItem" TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}">
             <Setter Property="Padding" Value="10,3" />
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <EventSetter Event="ContextMenuOpening" Handler="PlaylistRowMenu_Opening" />
+            <Setter Property="ContextMenu">
+                <Setter.Value><ContextMenu Style="{StaticResource Ts.ContextMenu}" /></Setter.Value>
+            </Setter>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="ListBoxItem">
@@ -503,10 +533,15 @@
                                     <ListBox.ItemTemplate>
                                         <DataTemplate>
                                             <Grid>
-                                                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                                                <TextBlock Text="{Binding Name}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"
+                                                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                                <Border Background="Transparent" Margin="0,0,6,0" ToolTip="{loc:Translate LocalPlaylist}"
+                                                        AutomationProperties.Name="{loc:Translate LocalPlaylist}"
+                                                        Visibility="{Binding IsLocal, Converter={StaticResource Visible}}">
+                                                    <icons:SvgIcon Kind="Save" Width="12" Height="12" Foreground="{DynamicResource Ts.TextSecondary}" />
+                                                </Border>
+                                                <TextBlock Grid.Column="1" Text="{Binding Name}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"
                                                            VerticalAlignment="Center" Margin="0,0,8,0" />
-                                                <TextBlock Grid.Column="1" Text="{Binding Count}" Foreground="{DynamicResource Ts.TextSecondary}"
+                                                <TextBlock Grid.Column="2" Text="{Binding Count}" Foreground="{DynamicResource Ts.TextSecondary}"
                                                            FontSize="12" VerticalAlignment="Center"
                                                            AutomationProperties.Name="{Binding Count, StringFormat={loc:Translate PlaylistTrackCountFormat}}" />
                                             </Grid>
@@ -517,20 +552,29 @@
                             <Grid Grid.Column="2">
                                 <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
                                 <DockPanel Margin="0,0,0,12">
-                                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                                        <Button Style="{StaticResource IconButton}" Command="{Binding ActionCommand}" CommandParameter="playlist-play" ToolTip="{loc:Translate QueueWholePlaylist}" AutomationProperties.Name="{loc:Translate QueueWholePlaylist}"><icons:SvgIcon Kind="Play" /></Button>
-                                        <Button Style="{StaticResource IconButton}" Command="{Binding ActionCommand}" CommandParameter="playlist-add-current" ToolTip="{loc:Translate SaveCurrentTrack}" AutomationProperties.Name="{loc:Translate SaveCurrentTrack}"><icons:SvgIcon Kind="Save" /></Button>
-                                        <Button Style="{StaticResource IconButton}" Click="PlaylistMenu_Click" ToolTip="{loc:Translate PlaylistActions}" AutomationProperties.Name="{loc:Translate PlaylistActions}"><icons:SvgIcon Kind="More" /></Button>
-                                    </StackPanel>
+                                    <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" VerticalAlignment="Center"
+                                            Command="{Binding ActionCommand}" CommandParameter="playlist-add-current"
+                                            ToolTip="{loc:Translate SaveCurrentTrack}" AutomationProperties.Name="{loc:Translate SaveCurrentTrack}"><icons:SvgIcon Kind="Save" /></Button>
+                                    <Button DockPanel.Dock="Left" Style="{StaticResource PlaylistPlayButton}" Margin="0,0,12,0"
+                                            Command="{Binding ActionCommand}" CommandParameter="playlist-play"
+                                            ToolTip="{loc:Translate QueueWholePlaylist}" AutomationProperties.Name="{loc:Translate QueueWholePlaylist}"><icons:SvgIcon Kind="Play" Width="23" Height="23" /></Button>
                                     <TextBlock Text="{Binding SelectedPlaylist.Name, TargetNullValue={loc:Translate ChoosePlaylist}}" FontSize="20" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
                                 </DockPanel>
                                 <DataGrid x:Name="PlaylistTrackGrid" Grid.Row="1" ItemsSource="{Binding Songs}" SelectedItem="{Binding SelectedSong}"
-                                          Style="{StaticResource TrackGrid}" MouseDoubleClick="Playlist_DoubleClick"
-                                          PreviewMouseLeftButtonDown="PlaylistDrag_Start" PreviewMouseMove="PlaylistDrag_Move"
-                                          PreviewMouseLeftButtonUp="PlaylistDrag_Release" AllowDrop="True"
+                                          Style="{StaticResource TrackGrid}"
+                                          PreviewMouseDown="PlaylistDrag_Start" PreviewMouseMove="PlaylistDrag_Move"
+                                          PreviewMouseUp="PlaylistDrag_Release" AllowDrop="True"
                                           PreviewDragEnter="PlaylistDrag_Over" PreviewDragOver="PlaylistDrag_Over"
                                           PreviewDragLeave="PlaylistDrag_Leave" PreviewDrop="PlaylistDrag_Drop"
                                           AutomationProperties.Name="{loc:Translate PlaylistTracks}" AutomationProperties.HelpText="{loc:Translate PlaylistDragHint}">
+                                    <DataGrid.RowStyle>
+                                        <Style TargetType="DataGridRow" BasedOn="{StaticResource {x:Type DataGridRow}}">
+                                            <EventSetter Event="ContextMenuOpening" Handler="PlaylistTrackMenu_Opening" />
+                                            <Setter Property="ContextMenu">
+                                                <Setter.Value><ContextMenu Style="{StaticResource Ts.ContextMenu}" /></Setter.Value>
+                                            </Setter>
+                                        </Style>
+                                    </DataGrid.RowStyle>
                                     <DataGrid.Columns>
                                         <DataGridTextColumn Header="{loc:Translate Track}" Binding="{Binding Name}" Width="2*" MinWidth="92" ElementStyle="{StaticResource TableTitle}" />
                                         <DataGridTemplateColumn Header="{loc:Translate Artist}" SortMemberPath="Author" Width="*" MinWidth="96" MaxWidth="150"

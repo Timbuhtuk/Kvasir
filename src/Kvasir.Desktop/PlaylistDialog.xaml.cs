@@ -10,7 +10,8 @@ public partial class PlaylistDialog : ThemedDialogWindow
     private readonly string? _existingName;
 
     public string Input => InputBox.Text.Trim();
-    public bool Shared => SharedBox.IsChecked == true;
+    public bool Shared => ScopeBox.SelectedValue is "shared";
+    public bool IsLocal => ScopeBox.SelectedValue is "local";
 
     public PlaylistDialog(string? existingName = null)
     {
@@ -18,7 +19,7 @@ public partial class PlaylistDialog : ThemedDialogWindow
         _existingName = existingName;
         Title = UiText.Get(existingName == null ? "NewPlaylist" : "EditPlaylist");
         InputBox.Text = existingName ?? "";
-        SharedBox.Visibility = existingName == null ? Visibility.Visible : Visibility.Collapsed;
+        ScopeFields.Visibility = existingName == null ? Visibility.Visible : Visibility.Collapsed;
         InputBox.TextChanged += (_, _) => UpdateSubmit();
         Loaded += (_, _) => { InputBox.Focus(); InputBox.SelectAll(); };
         UpdateSubmit();

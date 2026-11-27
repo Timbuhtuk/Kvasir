@@ -46,6 +46,8 @@ public partial class Playlist : IEntity
     [Column("Is_public")]
     public bool IsPublic { get; set; } = false;
 
+    public bool IsLocal { get; set; }
+
     /// <summary>
     /// Navigation property: guilds using this playlist
     /// </summary>

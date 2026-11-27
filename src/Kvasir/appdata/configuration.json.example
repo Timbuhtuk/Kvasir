@@ -34,9 +34,5 @@
     "enableConsoleLogging": true,
     "dbLogLevel": "None"
   },
-  "help_client": {
-    "help_message": "Music commands: /play, /pause, /resume, /skip, /clear, /leave and /anchor.",
-    "ready": "ready"
-  },
   "connection_string": "Data Source=appdata\\DiscordMusicDB.db"
 }

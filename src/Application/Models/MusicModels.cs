@@ -2,7 +2,10 @@ using Entities.Models;
 
 namespace Application.Models;
 
-public sealed record MusicActor(ulong UserId, ulong? VoiceChannelId, bool IsManager = false, IReadOnlyCollection<ulong>? RoleIds = null);
+public sealed record MusicActor(ulong UserId, ulong? VoiceChannelId, bool IsManager = false, IReadOnlyCollection<ulong>? RoleIds = null)
+{
+    public bool CanAccessLocalPlaylists { get; init; }
+}
 
 public sealed record QueueEntry(Guid Id, Guid BatchId, BotVoiceChannel Channel, Song Song, ulong RequestedBy, DateTime AddedUtc);
 

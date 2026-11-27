@@ -8,7 +8,14 @@
     <StackPanel Margin="24">
         <TextBlock Text="{loc:Translate PlaylistNameOrLink}" Style="{StaticResource FieldLabel}" />
         <TextBox x:Name="InputBox" AutomationProperties.Name="{loc:Translate PlaylistNameOrLink}" />
-        <CheckBox x:Name="SharedBox" Content="{loc:Translate SharedPlaylist}" Style="{StaticResource Ts.CompactSwitchBox}" Margin="0,12,0,0" />
+        <StackPanel x:Name="ScopeFields" Margin="0,12,0,0">
+            <TextBlock Text="{loc:Translate PlaylistScope}" Style="{StaticResource FieldLabel}" />
+            <ComboBox x:Name="ScopeBox" SelectedIndex="0" SelectedValuePath="Tag" AutomationProperties.Name="{loc:Translate PlaylistScope}">
+                <ComboBoxItem Tag="private" Content="{loc:Translate PrivatePlaylist}" />
+                <ComboBoxItem Tag="shared" Content="{loc:Translate SharedPlaylist}" />
+                <ComboBoxItem Tag="local" Content="{loc:Translate LocalPlaylistChoice}" />
+            </ComboBox>
+        </StackPanel>
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,22,0,0">
             <Button Content="{loc:Translate Cancel}" IsCancel="True" Style="{StaticResource Ts.CompactButton}" Margin="0,0,8,0" />
             <Button x:Name="SubmitButton" IsDefault="True" Click="Submit_Click" Style="{StaticResource Ts.PrimaryButton}" />

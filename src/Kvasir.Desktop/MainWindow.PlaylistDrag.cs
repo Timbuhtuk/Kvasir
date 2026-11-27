@@ -12,7 +12,7 @@ namespace Kvasir.Desktop;
 public partial class MainWindow
 {
     private const string PlaylistTrackDragFormat = "Kvasir.PlaylistTrack";
-    private sealed record PlaylistTrackDrag(ServerWorkspace Server, int PlaylistId, int TrackId, Point Origin);
+    private sealed record PlaylistTrackDrag(ServerWorkspace Server, int PlaylistId, int TrackId, Point Origin, bool PlayOnRelease);
     private sealed record PlaylistDropSite(FrameworkElement Element, int Id, DragDropEffects Effect, bool After = false);
     private PlaylistTrackDrag? _pendingPlaylistDrag, _activePlaylistDrag;
     private PlaylistDropSite? _playlistDropSite;
@@ -26,27 +26,29 @@ public partial class MainWindow
 
     private void PlaylistDrag_Start(object sender, MouseButtonEventArgs e)
     {
+        if (e.ChangedButton != MouseButton.Left) return;
         _pendingPlaylistDrag = null;
-        if (e.ClickCount != 1 || !_viewModel.GuildEnabled || _viewModel.SelectedTab is not { } server ||
+        if (!_viewModel.GuildEnabled || _viewModel.SelectedTab is not { } server ||
             _viewModel.SelectedPlaylist is not { } playlist || FindRow(e.OriginalSource as DependencyObject)?.Item is not TrackItem track)
             return;
 
-        _pendingPlaylistDrag = new(server, playlist.Id, track.Id, e.GetPosition(PlaylistTrackGrid));
+        _pendingPlaylistDrag = new(server, playlist.Id, track.Id, e.GetPosition(PlaylistTrackGrid), e.ClickCount == 2);
     }
 
     private void PlaylistDrag_Move(object sender, MouseEventArgs e)
     {
         if (e.LeftButton != MouseButtonState.Pressed) { _pendingPlaylistDrag = null; return; }
         if (_activePlaylistDrag != null || _pendingPlaylistDrag is not { } drag || !IsCurrentPlaylistDrag(drag)) return;
-        Vector distance = e.GetPosition(PlaylistTrackGrid) - drag.Origin;
-        if (Math.Abs(distance.X) < SystemParameters.MinimumHorizontalDragDistance &&
-            Math.Abs(distance.Y) < SystemParameters.MinimumVerticalDragDistance) return;
+
+        // Keep DataGrid's drag-selection from taking over while the pointer crosses the drag threshold.
+        e.Handled = true;
+        if (!HasPlaylistDragDistance(drag.Origin, e.GetPosition(PlaylistTrackGrid))) return;
 
         _pendingPlaylistDrag = null;
         _activePlaylistDrag = drag;
         try
         {
-            e.Handled = true;
+            if (PlaylistTrackGrid.IsMouseCaptured) PlaylistTrackGrid.ReleaseMouseCapture();
             DragDrop.DoDragDrop(PlaylistTrackGrid, new DataObject(PlaylistTrackDragFormat, ""),
                 DragDropEffects.Move | DragDropEffects.Copy);
         }
@@ -57,7 +59,23 @@ public partial class MainWindow
         }
     }
 
-    private void PlaylistDrag_Release(object sender, MouseButtonEventArgs e) => _pendingPlaylistDrag = null;
+    private void PlaylistDrag_Release(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton != MouseButton.Left) return;
+        var drag = _pendingPlaylistDrag;
+        _pendingPlaylistDrag = null;
+        if (drag is not { PlayOnRelease: true } || !IsCurrentPlaylistDrag(drag)) return;
+
+        Point position = e.GetPosition(PlaylistTrackGrid);
+        if (!HasPlaylistDragDistance(drag.Origin, position) &&
+            FindRow(PlaylistTrackGrid.InputHitTest(position) as DependencyObject)?.Item is TrackItem track && track.Id == drag.TrackId &&
+            _viewModel.SelectedSong?.Id == drag.TrackId)
+            _viewModel.ActionCommand.Execute("playlist-song-play");
+    }
+
+    private static bool HasPlaylistDragDistance(Point origin, Point position) =>
+        Math.Abs(position.X - origin.X) >= SystemParameters.MinimumHorizontalDragDistance ||
+        Math.Abs(position.Y - origin.Y) >= SystemParameters.MinimumVerticalDragDistance;
 
     private bool IsCurrentPlaylistDrag(PlaylistTrackDrag drag) =>
         _viewModel.GuildEnabled && ReferenceEquals(drag.Server, _viewModel.SelectedTab) && drag.PlaylistId == _viewModel.SelectedPlaylist?.Id;

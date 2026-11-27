@@ -28,6 +28,7 @@ public class Program
     {
         Console.OutputEncoding = System.Text.Encoding.UTF8;
         Console.InputEncoding = System.Text.Encoding.UTF8;
+        using var dataSession = ApplicationPaths.OpenDataSession();
         ApplicationPaths.EnsureConfiguration();
         Directory.SetCurrentDirectory(ApplicationPaths.DataDirectory);
         IHost host;
@@ -45,7 +46,9 @@ public class Program
 
         using (IServiceScope scope = host.Services.CreateScope())
         {
-            await scope.ServiceProvider.GetRequiredService<DiscordMusicDBContext>().Database.MigrateAsync();
+            var database = scope.ServiceProvider.GetRequiredService<DiscordMusicDBContext>();
+            await database.Database.MigrateAsync();
+            await RebaseSongPathsAsync(database, ApplicationPaths.DataDirectory);
             IReadOnlyList<Application.Models.DiagnosticCheck> checks = await scope.ServiceProvider.GetRequiredService<IMusicDiagnostics>().CheckAsync();
             foreach (var check in checks.Where(c => !c.Healthy))
                 await Logger.AddLog($"Startup: {check.Name}: {check.Detail}", LogLevel.Warning);
@@ -64,6 +67,26 @@ public class Program
             await ((IAsyncDisposable)host).DisposeAsync();
             Logger.Shutdown();
         }
+    }
+
+    internal static async Task RebaseSongPathsAsync(DiscordMusicDBContext database, string directory)
+    {
+        string marker = Path.Combine(directory, ApplicationPaths.PreviousDirectoriesFile);
+        if (!File.Exists(marker)) return;
+        string[] previous = System.Text.Json.JsonSerializer.Deserialize<string[]>(await File.ReadAllTextAsync(marker))
+            ?? throw new InvalidDataException("Invalid data migration record.");
+        using var transaction = await database.Database.BeginTransactionAsync();
+        foreach (string source in previous)
+        {
+            string prefix = Path.TrimEndingDirectorySeparator(source).Replace('\\', '/') + "/";
+            string target = directory + Path.DirectorySeparatorChar;
+            await database.Database.ExecuteSqlInterpolatedAsync($"""
+                UPDATE Song SET File_path = {target} || substr(File_path, length({prefix}) + 1)
+                WHERE substr(replace(File_path, char(92), '/'), 1, length({prefix})) = {prefix} COLLATE NOCASE
+                """);
+        }
+        await transaction.CommitAsync();
+        File.Delete(marker);
     }
 
     private static async Task WaitForShutdownAsync(IHost host)

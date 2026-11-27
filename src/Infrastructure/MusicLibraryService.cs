@@ -11,13 +11,19 @@ namespace Infrastructure;
 public sealed class MusicLibraryService(IServiceScopeFactory scopes, IMusicPreferences preferences, IVideoFinderService finder, TrackService tracks) : IMusicLibrary
 {
     private readonly SemaphoreSlim _edit = new(1, 1);
-    private static bool Visible(Playlist p, ulong guildId, MusicActor actor) => p.Guilds.Any(g => g.DiscordId == guildId) && (p.IsPublic || p.AuthorId == actor.UserId || actor.IsManager);
-    private static bool Editable(Playlist p, ulong guildId, MusicActor actor) => Visible(p, guildId, actor) && (p.AuthorId == actor.UserId || actor.IsManager);
+    private static bool Visible(Playlist p, ulong guildId, MusicActor actor) => p.IsLocal ? actor.CanAccessLocalPlaylists :
+        p.Guilds.Any(g => g.DiscordId == guildId) && (p.IsPublic || p.AuthorId == actor.UserId || actor.IsManager);
+    private static bool Editable(Playlist p, ulong guildId, MusicActor actor) => Visible(p, guildId, actor) &&
+        (p.IsLocal || p.AuthorId == actor.UserId || actor.IsManager);
     public async Task<IReadOnlyList<Playlist>> ListAsync(ulong guildId, MusicActor actor, string search = "")
     {
         using var scope = scopes.CreateScope(); var db = scope.ServiceProvider.GetRequiredService<DiscordMusicDBContext>();
-        List<Playlist> lists = await db.Playlists.AsNoTracking().Include(p => p.Songs).Where(p => p.Guilds.Any(g => g.DiscordId == guildId) && (p.IsPublic || p.AuthorId == actor.UserId || actor.IsManager)).ToListAsync();
-        return lists.Where(p => p.Name.Contains(search, StringComparison.OrdinalIgnoreCase)).OrderBy(p => p.Name).ToList();
+        List<Playlist> lists = await db.Playlists.AsNoTracking().Include(p => p.Songs)
+            .Where(p => p.IsLocal ? actor.CanAccessLocalPlaylists :
+                p.Guilds.Any(g => g.DiscordId == guildId) && (p.IsPublic || p.AuthorId == actor.UserId || actor.IsManager))
+            .ToListAsync();
+        return lists.Where(p => p.Name.Contains(search, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(p => p.IsLocal).ThenBy(p => p.Name).ToList();
     }
     public async Task<Playlist?> GetAsync(ulong guildId, MusicActor actor, int playlistId)
     {
@@ -30,12 +36,17 @@ public sealed class MusicLibraryService(IServiceScopeFactory scopes, IMusicPrefe
         playlist.Songs = playlist.Songs.OrderBy(s => positions.GetValueOrDefault(s.Id, int.MaxValue)).ThenBy(s => s.Id).ToList();
         return playlist;
     }
-    public async Task<Playlist> CreateAsync(ulong guildId, MusicActor actor, string name, bool shared)
+    public async Task<Playlist> CreateAsync(ulong guildId, MusicActor actor, string name, bool shared, bool local = false)
     {
         if (string.IsNullOrWhiteSpace(name) || name.Trim().Length > 128) throw new ArgumentException("Название должно содержать от 1 до 128 символов.");
+        if (local && !actor.CanAccessLocalPlaylists) throw new ArgumentException("Локальные плейлисты доступны только в пульте.");
         using var scope = scopes.CreateScope(); var db = scope.ServiceProvider.GetRequiredService<DiscordMusicDBContext>();
-        Guild guild = await db.Guilds.FirstAsync(g => g.DiscordId == guildId);
-        Playlist playlist = new() { Name = name.Trim(), AuthorId = actor.UserId, CreationDate = DateTime.UtcNow, IsPublic = shared, Guilds = new List<Guild> { guild } };
+        Playlist playlist = new()
+        {
+            Name = name.Trim(), AuthorId = local ? 0 : actor.UserId, CreationDate = DateTime.UtcNow,
+            IsPublic = shared && !local, IsLocal = local
+        };
+        if (!local) playlist.Guilds.Add(await db.Guilds.FirstAsync(g => g.DiscordId == guildId));
         db.Playlists.Add(playlist); await db.SaveChangesAsync(); return playlist;
     }
     public async Task<OperationResult> EditAsync(ulong guildId, MusicActor actor, int playlistId, string action, string? value = null, int? songId = null)
@@ -52,7 +63,9 @@ public sealed class MusicLibraryService(IServiceScopeFactory scopes, IMusicPrefe
                 case "rename":
                     if (string.IsNullOrWhiteSpace(value) || value.Trim().Length > 128) return OperationResult.Fail("Название: от 1 до 128 символов.");
                     p.Name = value.Trim(); break;
-                case "share": p.IsPublic = !p.IsPublic; break;
+                case "share":
+                    if (p.IsLocal) return OperationResult.Fail("Доступ к локальному плейлисту нельзя изменить.");
+                    p.IsPublic = !p.IsPublic; break;
                 case "delete": db.Playlists.Remove(p); order.Clear(); break;
                 case "add":
                     Song? song = await db.Songs.FindAsync(songId);

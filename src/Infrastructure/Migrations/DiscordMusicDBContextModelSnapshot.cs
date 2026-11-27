@@ -58,6 +58,9 @@ namespace Infrastructure.Migrations
                         .HasColumnType("datetime2")
                         .HasColumnName("Creation_date");
 
+                    b.Property<bool>("IsLocal")
+                        .HasColumnType("INTEGER");
+
                     b.Property<bool>("IsPublic")
                         .HasColumnType("INTEGER")
                         .HasColumnName("Is_public");

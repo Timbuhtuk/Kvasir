@@ -129,13 +129,29 @@ internal static partial class Program
         await using var db = new DiscordMusicDBContext(options);
         await db.GetService<IMigrator>().MigrateAsync("20251114204016_InitialCreate");
         await db.Database.ExecuteSqlRawAsync("INSERT INTO Song (id, Name, Views) VALUES (42, 'Legacy track', 7)");
+        await db.Database.ExecuteSqlRawAsync("INSERT INTO Playlist (id, Name, Author_id, Creation_date, Is_public) VALUES (42, 'Legacy playlist', 100, '2025-11-18', 1)");
         await db.Database.MigrateAsync();
         var repo = new SongRepository(db, provider.GetRequiredService<IVideoFinderService>(), provider.GetRequiredService<IMediaCache>());
         var song = await repo.GetByIdAsync(42);
         Check(song is { Name: "Legacy track", IsDownloaded: false, Views: 7 }, "SQLite upgrade preserves existing songs and backfills the new column");
+        Check(await db.Playlists.SingleAsync() is { Name: "Legacy playlist", IsLocal: false, IsPublic: true },
+            "Existing playlists keep their visibility when upgraded");
         Check(await repo.IncrementViewsAsync(song!), "EF Core translates and executes the view counter update");
         Check((await repo.GetPopularSongsListAsync()).Single().Views == 8, "SQLite persists the atomic view counter update");
         Check(!(await db.Database.GetPendingMigrationsAsync()).Any(), "SQLite startup leaves no pending migrations");
+        string previous = Path.Combine(root, "old Kvasir");
+        string relativeTrack = Path.Combine("music", "legacy.pcm");
+        await db.Songs.Where(s => s.Id == 42).ExecuteUpdateAsync(update =>
+            update.SetProperty(s => s.FilePath, Path.Combine(previous, relativeTrack)));
+        string external = Path.Combine(previous + "-external", "unrelated.pcm");
+        db.Songs.Add(new Song { Id = 43, Name = "External", FilePath = external });
+        await db.SaveChangesAsync();
+        string marker = Path.Combine(root, Kvasir.Configuration.ApplicationPaths.PreviousDirectoriesFile);
+        await File.WriteAllTextAsync(marker, JsonSerializer.Serialize(new[] { previous }));
+        await CS_Discord_Bot.Program.RebaseSongPathsAsync(db, root);
+        string?[] paths = await db.Songs.OrderBy(s => s.Id).Select(s => s.FilePath).ToArrayAsync();
+        Check(paths.SequenceEqual([Path.Combine(root, relativeTrack), external]) && !File.Exists(marker),
+            "Moving data repairs saved cache paths and preserves external paths");
     }
     private static void TestQueue()
     {
@@ -439,6 +455,7 @@ internal sealed class FakeDownloader : IAudioDownloaderService
 }
 internal sealed class FakeNormalizer : IAudioNormalizer
 {
+    public Task<bool> CanDecodeCompressedAsync(string source, CancellationToken cancellationToken) => Task.FromResult(true);
     public Task NormalizeCompressedAsync(string source, string destination, CancellationToken cancellationToken) =>
         File.WriteAllBytesAsync(destination, new byte[192000], cancellationToken);
     public Task NormalizeAsync(string source, string destination, CancellationToken cancellationToken) { File.Copy(source, destination, true); return Task.CompletedTask; }

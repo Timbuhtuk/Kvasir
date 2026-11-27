@@ -32,12 +32,13 @@ public partial class SettingsWindow : Window
         _botConfiguration = botConfiguration;
         _preferences = DesktopPreferences.Load(preferencesPath) with { Theme = ThemeManager.Current };
         InitializeComponent();
-        ConfigurationPathBox.Text = _botConfiguration.FilePath;
+        LoadParameters();
         LoadAudioConversion();
         LanguageBox.SelectedValue = _preferences.Language;
         UpdateLanguageHint();
         ConfigureNotificationPositions();
         ThemeButton(_preferences.Theme).IsChecked = true;
+        InitializeMaintenance();
         _initialized = true;
     }
 
@@ -180,7 +181,57 @@ public partial class SettingsWindow : Window
         }
     }
 
-    private void OpenConfiguration_Click(object sender, RoutedEventArgs e) => OpenPath(_botConfiguration.FilePath);
+    private void LoadParameters()
+    {
+        try
+        {
+            var settings = _botConfiguration.ReadSettings();
+            OwnerIdBox.Text = settings.OwnerId;
+            CacheLimitBox.Text = settings.CacheLimitMb.ToString();
+            CacheAgeBox.Text = settings.CacheAgeDays.ToString();
+            SpotifyBox.IsChecked = settings.SpotifyEnabled;
+            SpotifyIdBox.Text = settings.SpotifyClientId;
+            SpotifySecretBox.Password = settings.SpotifySecret;
+            LogLevelBox.ItemsSource = DbLogLevelBox.ItemsSource = BotSettings.LogLevels;
+            LogLevelBox.SelectedItem = settings.LogLevel;
+            DbLogLevelBox.SelectedItem = settings.DatabaseLogLevel;
+            FileLoggingBox.IsChecked = settings.FileLogging;
+            ConsoleLoggingBox.IsChecked = settings.ConsoleLogging;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
+        {
+            BotParametersForm.IsEnabled = false;
+            SettingsMessage.Text = UiText.Get("ConfigurationErrorTitle");
+        }
+    }
+
+    private void SaveParameters_Click(object sender, RoutedEventArgs e)
+    {
+        string owner = OwnerIdBox.Text.Trim();
+        string id = SpotifyIdBox.Text.Trim();
+        string secret = SpotifySecretBox.Password.Trim();
+        if (owner.Length > 0 && (!ulong.TryParse(owner, System.Globalization.NumberStyles.None, null, out ulong parsed) || parsed == 0))
+            ParametersStatus.Text = UiText.Get("InvalidOwnerId");
+        else if (!int.TryParse(CacheLimitBox.Text, out int limit) || limit is < 64 or > 1048576)
+            ParametersStatus.Text = UiText.Get("InvalidCacheLimit");
+        else if (!int.TryParse(CacheAgeBox.Text, out int days) || days is < 1 or > 3650)
+            ParametersStatus.Text = UiText.Get("InvalidCacheAge");
+        else if (SpotifyBox.IsChecked == true && (id.Length == 0 || secret.Length == 0))
+            ParametersStatus.Text = UiText.Get("MissingSpotifyCredentials");
+        else
+        {
+            try
+            {
+                _botConfiguration.SaveSettings(new(owner, limit, days, SpotifyBox.IsChecked == true, id, secret,
+                    (string)LogLevelBox.SelectedItem, (string)DbLogLevelBox.SelectedItem, FileLoggingBox.IsChecked == true, ConsoleLoggingBox.IsChecked == true));
+                ParametersStatus.Text = UiText.Get("BotParametersSaved");
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
+            {
+                ParametersStatus.Text = UiText.Get("SaveBotParametersFailed");
+            }
+        }
+    }
     private void ReleaseNotes_Click(object sender, RoutedEventArgs e)
     {
         if (ReleaseNotesWindow.LoadCatalog() is not { } notes)
@@ -192,7 +243,7 @@ public partial class SettingsWindow : Window
     }
     private void Token_Click(object sender, RoutedEventArgs e)
     {
-        if (new TokenDialog { Owner = this }.ShowDialog() == true) { TokenChanged = true; Close(); }
+        if (new TokenDialog(configuration: _botConfiguration) { Owner = this }.ShowDialog() == true) { TokenChanged = true; Close(); }
     }
     private void OpenDataFolder_Click(object sender, RoutedEventArgs e) => OpenPath(ApplicationPaths.DataDirectory);
     private void OpenPath(string path)

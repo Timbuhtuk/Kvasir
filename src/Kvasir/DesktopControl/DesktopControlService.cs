@@ -20,6 +20,7 @@ public sealed class DesktopControlService(GatewayClient gateway, IBotConnector c
     GuildService guilds, IMusicLibrary library, PlaylistImportService imports, IMusicDiagnostics diagnostics, IMediaCache cache,
     ISoundboardLibrary soundboard, IVideoFinderService finder, MediaActivity mediaActivity, TrackService tracks) : BackgroundService
 {
+    private const ulong LocalPlaylistImportScope = 0;
     private CheckItem[] _checks = [];
     private CacheItem? _cache;
 
@@ -149,7 +150,7 @@ public sealed class DesktopControlService(GatewayClient gateway, IBotConnector c
         BotVoiceChannel? channel = gateway.Cache.Guilds.TryGetValue(guild.Id, out var cached) && channelId.HasValue &&
             cached.Channels.TryGetValue(channelId.Value, out var candidate) && candidate is VoiceGuildChannel voice
             ? new(voice.Id, guild.Id, voice.Name) : null;
-        MusicActor actor = new(connector.CurrentUserId, channel?.Id, IsManager: true);
+        MusicActor actor = new(connector.CurrentUserId, channel?.Id, IsManager: true) { CanAccessLocalPlaylists = true };
         OperationResult result = OperationResult.Ok("");
         switch (request.Action)
         {
@@ -193,8 +194,11 @@ public sealed class DesktopControlService(GatewayClient gateway, IBotConnector c
                 string source = link ?? request.ImportQuery?.Trim() ?? "";
                 source = YtDlpMetadata.GetPlaylistUrl(source) ?? source;
                 bool import = source.Length > 0;
+                bool local = create ? request.CreateLocalPlaylist : import &&
+                    (await library.GetAsync(guild.Id, actor, RequiredPlaylist(request)))?.IsLocal == true;
+                ulong importScope = local ? LocalPlaylistImportScope : guild.Id;
                 // The desktop command pipe handles playlist mutations serially for the bot's actor.
-                if (import && imports.IsImportRunning(guild.Id, actor.UserId))
+                if (import && imports.IsImportRunning(importScope, actor.UserId))
                 {
                     result = OperationResult.Fail("Предыдущий импорт ещё выполняется.");
                     break;
@@ -210,14 +214,14 @@ public sealed class DesktopControlService(GatewayClient gateway, IBotConnector c
                                 { MessageKey = "PlaylistSourceRequired" };
                         if (name.Length > 128) name = name[..128].TrimEnd();
                     }
-                    Playlist created = await library.CreateAsync(guild.Id, actor, name, request.Number == 1);
+                    Playlist created = await library.CreateAsync(guild.Id, actor, name, request.Number == 1, local);
                     request = request with { PlaylistId = created.Id };
                     result = OperationResult.Ok("Плейлист создан.", "PlaylistCreated");
                 }
                 else result = await library.EditAsync(guild.Id, actor, RequiredPlaylist(request), "rename", request.Value);
                 if (import && result.Success)
                 {
-                    result = imports.StartImport(guild.Id, actor, RequiredPlaylist(request), source);
+                    result = imports.StartImport(importScope, actor, RequiredPlaylist(request), source);
                     if (result.Success)
                         result = create
                             ? OperationResult.Ok("Плейлист создан, импорт запущен.", "PlaylistCreatedImportStarted")
@@ -236,13 +240,31 @@ public sealed class DesktopControlService(GatewayClient gateway, IBotConnector c
                     ? await library.CopyTrackAsync(guild.Id, actor, sourcePlaylist, destinationPlaylist, copied)
                     : OperationResult.Fail("Укажите исходный и целевой плейлисты и трек.") with { MessageKey = "PlaylistDropSourceMissing" };
                 break;
+            case "playlist-retry-track":
+                Playlist? retryPlaylist = request.PlaylistId is int retryPlaylistId
+                    ? await library.GetAsync(guild.Id, actor, retryPlaylistId) : null;
+                Song? retrySong = retryPlaylist?.Songs.FirstOrDefault(song => song.Id == request.SongId);
+                if (retrySong == null)
+                    result = OperationResult.Fail("Трек недоступен в этом плейлисте.") with { MessageKey = "PlaylistTrackUnavailable" };
+                else if (retrySong.IsDownloaded)
+                    result = OperationResult.Ok("Трек уже скачан.", "TrackAlreadyDownloaded");
+                else if (string.IsNullOrWhiteSpace(retrySong.Link))
+                    result = OperationResult.Fail("У трека нет ссылки для загрузки.") with { MessageKey = "TrackDownloadLinkMissing" };
+                else
+                {
+                    tracks.Schedule([retrySong]);
+                    result = OperationResult.Ok("Трек поставлен на загрузку.", "TrackDownloadQueued", retrySong.Name);
+                }
+                break;
             case "playlist-add-current":
                 QueueEntry? current = music.Current;
                 result = current == null ? OperationResult.Fail("Сейчас ничего не играет.") :
                     await library.EditAsync(guild.Id, actor, RequiredPlaylist(request), "add", songId: current.Song.Id); break;
             case "playlist-import":
                 string query = Required(request.Value);
-                result = imports.StartImport(guild.Id, actor, RequiredPlaylist(request), YtDlpMetadata.GetPlaylistUrl(query) ?? query);
+                Playlist? target = await library.GetAsync(guild.Id, actor, RequiredPlaylist(request));
+                result = target == null ? OperationResult.Fail("Плейлист недоступен для изменения.") :
+                    imports.StartImport(target.IsLocal ? LocalPlaylistImportScope : guild.Id, actor, target.Id, YtDlpMetadata.GetPlaylistUrl(query) ?? query);
                 if (result.Success) result = OperationResult.Ok("Импорт запущен. Прогресс виден в библиотеке.", "PlaylistImportStarted");
                 break;
             case "playlist-play": case "playlist-song-play":
@@ -255,7 +277,7 @@ public sealed class DesktopControlService(GatewayClient gateway, IBotConnector c
                     await music.EnqueueAsync(channel, actor, songs: new[] { history }); break;
             default: result = OperationResult.Fail("Неизвестная команда пульта."); break;
         }
-        string? errorCode = !result.Success && request.Action is "playlist-move-track" or "playlist-copy-track" ? "input" : null;
+        string? errorCode = !result.Success && request.Action is "playlist-move-track" or "playlist-copy-track" or "playlist-retry-track" ? "input" : null;
         return new(result.Success, result.Message, await SnapshotAsync(guild, music, request), ErrorCode: errorCode)
         {
             MessageKey = result.MessageKey,
@@ -265,12 +287,11 @@ public sealed class DesktopControlService(GatewayClient gateway, IBotConnector c
 
     private async Task<ControlState> SnapshotAsync(BotGuild? guild, MusicClientService? music, ControlRequest request)
     {
-        MusicActor actor = new(connector.CurrentUserId, music?.VoiceChannelId, IsManager: true);
+        MusicActor actor = new(connector.CurrentUserId, music?.VoiceChannelId, IsManager: true) { CanAccessLocalPlaylists = true };
         Playlist? playlist = guild != null && request.PlaylistId.HasValue ? await library.GetAsync(guild.Id, actor, request.PlaylistId.Value) : null;
-        ImportProgress? import = guild == null ? null : imports.GetImport(guild.Id, actor.UserId);
         GuildMusicSettings? settings = music?.Settings;
         var playlists = guild == null ? [] : (await library.ListAsync(guild.Id, actor))
-            .Select(p => new PlaylistItem(p.Id, p.Name, p.AuthorId, p.IsPublic, p.Songs.Count)).ToArray();
+            .Select(p => new PlaylistItem(p.Id, p.Name, p.AuthorId, p.IsPublic, p.Songs.Count) { IsLocal = p.IsLocal }).ToArray();
         int? preparingSongId = cache.PreparingSongId;
         return new ControlState
         {
@@ -290,12 +311,12 @@ public sealed class DesktopControlService(GatewayClient gateway, IBotConnector c
             Playlists = playlists,
             PlaylistId = playlist?.Id, Songs = playlist?.Songs.Select(song => ToTrack(song) with
             {
-                DownloadState = song.Id == preparingSongId ? TrackDownloadState.Downloading :
-                    song.IsDownloaded ? TrackDownloadState.Downloaded : TrackDownloadState.Pending
+                DownloadState = song.IsDownloaded ? TrackDownloadState.Downloaded :
+                    song.Id == preparingSongId ? TrackDownloadState.Downloading : TrackDownloadState.Pending
             }).ToArray() ?? [],
             Settings = settings == null ? null : new(settings.DjRoleId, settings.VoteSkip, settings.FairQueue, settings.PerUserLimit, settings.Volume),
-            Import = import == null ? null : new(import.Completed, import.Total, import.Failures.ToArray(), import.Finished, import.ErrorCode, import.Detail)
-            { PlaylistId = import.PlaylistId },
+            Import = guild == null ? null : ToImport(imports.GetImport(guild.Id, actor.UserId)),
+            LocalImport = guild == null ? null : ToImport(imports.GetImport(LocalPlaylistImportScope, actor.UserId)),
             Checks = music == null ? _checks : _checks.Append(new CheckItem("Голосовой канал", music.VoiceChannelId.HasValue,
                 music.VoiceChannelId is { } voice ? $"Канал {voice}; состояние {music.Status}" : "Бот не подключён к голосовому каналу.")).ToArray(), Cache = _cache,
         };
@@ -309,6 +330,8 @@ public sealed class DesktopControlService(GatewayClient gateway, IBotConnector c
     }
     private string CacheMessage(string action) => action is "cache-clean" or "cache-repair" ? $"Кэш: удалено {_cache?.Removed}, восстановлено {_cache?.Repaired}, ошибок {_cache?.FailedRepairs}." : "";
     private static int RequiredPlaylist(ControlRequest request) => request.PlaylistId ?? throw new ArgumentException("Выберите плейлист.");
+    private static ImportItem? ToImport(ImportProgress? import) => import == null ? null :
+        new(import.Completed, import.Total, import.Failures.ToArray(), import.Finished, import.ErrorCode, import.Detail) { PlaylistId = import.PlaylistId };
     private static TrackItem ToTrack(Song song) => new(song.Id, song.Name, song.AuthorName, song.Duration ?? 0, song.Link);
     private static CacheItem ToCache(CacheReport report) => new(report.Bytes, report.LimitBytes, report.Files, report.InvalidFiles, report.Removed, report.Repaired, report.FailedRepairs);
 }

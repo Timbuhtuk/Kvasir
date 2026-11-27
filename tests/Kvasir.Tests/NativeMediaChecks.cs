@@ -6,6 +6,11 @@ using System.Diagnostics;
 using Application.Models;
 using Application.Services;
 using Connectors.Media;
+using Entities.Models;
+using Infrastructure;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Kvasir.Tests;
 
@@ -58,7 +63,7 @@ internal static partial class Program
         {
             string pcm = Path.Combine(root, "yt-dlp audio.pcm");
             MediaActivity activity = new();
-            var downloader = new AudioDownloaderService(activity);
+            var downloader = new SongAudioDownloader(activity);
             var transfer = downloader.TryDownloadWithProvider(address + "/audio.wav", pcm, Provider.YoutubeDLSharp, timeout.Token);
             bool measured = false;
             while (!transfer.IsCompleted)
@@ -79,6 +84,7 @@ internal static partial class Program
             Check(await downloader.DownloadCompressedAsync(address + "/audio.wav", compressed, "Unconverted fixture", timeout.Token) &&
                 (await File.ReadAllBytesAsync(compressed, timeout.Token)).SequenceEqual(wave),
                 "Decode-on-playback downloads the original bytes without creating PCM");
+            await TestCompressedCacheRepairAsync(root, downloader, address + "/audio.wav", timeout.Token);
 
             try
             {
@@ -142,5 +148,38 @@ internal static partial class Program
                 }
             }
         }
+    }
+
+    private static async Task TestCompressedCacheRepairAsync(string root, SongAudioDownloader downloader, string url, CancellationToken token)
+    {
+        string folder = Path.Combine(root, "compressed-cache");
+        Directory.CreateDirectory(folder);
+        var settings = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["music_client:music_folder"] = folder,
+            ["music_client:decode_on_playback"] = "true"
+        }).Build();
+        var services = new ServiceCollection().AddDbContext<DiscordMusicDBContext>(options =>
+            options.UseSqlite("Data Source=" + Path.Combine(folder, "cache.db")));
+        await using var provider = services.BuildServiceProvider();
+        await using var scope = provider.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<DiscordMusicDBContext>();
+        await db.Database.MigrateAsync(token);
+        string path = Path.Combine(folder, "1.audio");
+        var song = new Song { Id = 1, Name = "Fixture", Link = url, Duration = 1, IsDownloaded = true, FilePath = path };
+        db.Songs.Add(song);
+        await db.SaveChangesAsync(token);
+        await File.WriteAllTextAsync(path, "Nonempty corrupt audio fixture", token);
+
+        var cache = new MediaCacheService(provider.GetRequiredService<IServiceScopeFactory>(), downloader, new AudioNormalizer(), settings);
+        Check((await cache.InspectAsync()).InvalidFiles == 1, "Cache inspection detects a nonempty audio file FFmpeg cannot decode");
+        var repaired = await cache.MaintainAsync(true, token);
+        Check(repaired is { Repaired: 1, FailedRepairs: 0, InvalidFiles: 0 }, "Cache repair replaces a corrupt download");
+
+        await using var source = await cache.OpenAsync(song, token);
+        await using var pcm = await cache.OpenPlaybackStreamAsync(source, token);
+        byte[] frame = new byte[PcmEffectMixer.FrameBytes];
+        await pcm.ReadExactlyAsync(frame, token);
+        Check(frame.Any(b => b != 0), "The repaired download produces audio in CPU mode");
     }
 }

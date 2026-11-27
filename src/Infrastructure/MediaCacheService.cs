@@ -134,7 +134,8 @@ public sealed class MediaCacheService : IMediaCache
             try
             {
                 await PrepareFileAsync(entity, temporary, decodeOnPlayback, cancellationToken);
-                if (decodeOnPlayback ? !HasContent(temporary) : !Valid(temporary, entity.Duration))
+                if (decodeOnPlayback ? !HasContent(temporary) || !await _normalizer.CanDecodeCompressedAsync(temporary, cancellationToken) :
+                    !Valid(temporary, entity.Duration))
                     throw new IOException("Загружен неполный аудиофайл.");
                 await _gate.WaitAsync(cancellationToken);
                 try
@@ -199,20 +200,27 @@ public sealed class MediaCacheService : IMediaCache
     private List<FileInfo> Files() => new DirectoryInfo(_root).EnumerateFiles()
         .Where(f => (IsCompressed(f.Name) || f.Extension.Equals(".pcm", StringComparison.OrdinalIgnoreCase)) && IsManaged(f.FullName))
         .ToList();
-    public async Task<CacheReport> InspectAsync()
+    public Task<CacheReport> InspectAsync() => InspectAsync(CancellationToken.None);
+
+    private async Task<CacheReport> InspectAsync(CancellationToken cancellationToken)
     {
-        await _gate.WaitAsync();
+        List<FileInfo> files;
+        List<Song> songs;
+        await _gate.WaitAsync(cancellationToken);
         try
         {
-            var files = Files();
+            files = Files();
             using var scope = _scopes.CreateScope(); var db = scope.ServiceProvider.GetRequiredService<DiscordMusicDBContext>();
-            var songs = await db.Songs.AsNoTracking().Where(s => s.IsDownloaded).ToListAsync();
-            int invalid = files.Count(f => !ValidCachedFile(f.FullName));
-            invalid += songs.Count(s => s.FilePath == null || !File.Exists(s.FilePath) ||
-                ValidCachedFile(s.FilePath) && !ValidCachedFile(s.FilePath, s.Duration));
-            return new(files.Sum(f => f.Length), _limit, files.Count, invalid);
+            songs = await db.Songs.AsNoTracking().Where(s => s.IsDownloaded).ToListAsync(cancellationToken);
         }
         finally { _gate.Release(); }
+
+        int invalid = files.Count(f => !ValidCachedFile(f.FullName));
+        foreach (var file in files.Where(f => IsCompressed(f.FullName) && HasContent(f.FullName)))
+            if (!await _normalizer.CanDecodeCompressedAsync(file.FullName, cancellationToken)) invalid++;
+        invalid += songs.Count(s => s.FilePath == null || !File.Exists(s.FilePath) ||
+            ValidCachedFile(s.FilePath) && !ValidCachedFile(s.FilePath, s.Duration));
+        return new(files.Sum(f => f.Length), _limit, files.Count, invalid);
     }
     public async Task TrimAsync(CancellationToken cancellationToken = default)
     {
@@ -246,14 +254,45 @@ public sealed class MediaCacheService : IMediaCache
             foreach (Song song in songs)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                if (song.FilePath != null && IsManaged(song.FilePath) && ValidCachedFile(song.FilePath, song.Duration)) continue;
-                try { await using (await OpenAsync(song, cancellationToken)) { } repaired++; }
+                try
+                {
+                    if (song.FilePath is string path && IsManaged(path) &&
+                        (IsCompressed(path) ? await CheckCompressedForRepairAsync(song, path, cancellationToken) : Valid(path, song.Duration)))
+                        continue;
+                    await using (await OpenAsync(song, cancellationToken)) { }
+                    repaired++;
+                }
                 catch (OperationCanceledException) { throw; }
                 catch (Exception) { failed++; }
             }
         }
-        CacheReport before = await InspectAsync(); await TrimAsync(cancellationToken); CacheReport after = await InspectAsync();
-        return after with { Removed = Math.Max(0, before.Files - after.Files), Repaired = repaired, FailedRepairs = failed };
+        int before = Files().Count;
+        await TrimAsync(cancellationToken);
+        CacheReport after = await InspectAsync(cancellationToken);
+        return after with { Removed = Math.Max(0, before - after.Files), Repaired = repaired, FailedRepairs = failed };
+    }
+
+    private async Task<bool> CheckCompressedForRepairAsync(Song song, string path, CancellationToken cancellationToken)
+    {
+        string fullPath = Path.GetFullPath(path);
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            if (!IsManaged(fullPath)) throw new IOException("Небезопасный путь кэша.");
+            if (HasContent(fullPath) && await _normalizer.CanDecodeCompressedAsync(fullPath, cancellationToken)) return true;
+            lock (_leases) if (_leases.ContainsKey(fullPath)) throw new IOException("Файл кэша занят.");
+
+            using var scope = _scopes.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<DiscordMusicDBContext>();
+            var current = await db.Songs.FirstOrDefaultAsync(s => s.Id == song.Id, cancellationToken);
+            if (current == null || current.FilePath != path) return true;
+            File.Delete(fullPath);
+            current.FilePath = null;
+            current.IsDownloaded = false;
+            await db.SaveChangesAsync(cancellationToken);
+            return false;
+        }
+        finally { _gate.Release(); }
     }
     private sealed class LeasedStream(string path, Action release) : FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, true)
     {

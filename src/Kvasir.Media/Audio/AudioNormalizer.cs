@@ -6,6 +6,36 @@ public sealed class AudioNormalizer(MediaActivity? activity = null) : IAudioNorm
 {
     private readonly MediaActivity _activity = activity ?? new();
 
+    public async Task<bool> CanDecodeCompressedAsync(string source, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var start = new ProcessStartInfo(MediaTools.RuntimeFile("ffmpeg.exe"))
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardError = true
+        };
+        foreach (string argument in new[] { "-nostdin", "-loglevel", "error", "-xerror", "-abort_on", "empty_output",
+            "-i", source, "-map", "0:a:0", "-frames:a", "1", "-f", "null", "-" })
+            start.ArgumentList.Add(argument);
+
+        using Process process = Process.Start(start) ?? throw new IOException("FFmpeg не запустился.");
+        Task<string> errors = process.StandardError.ReadToEndAsync();
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(10));
+        try { await process.WaitForExitAsync(timeout.Token); }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new IOException("FFmpeg не завершил проверку аудиофайла за 10 секунд.");
+        }
+        finally
+        {
+            if (!process.HasExited) { process.Kill(); await process.WaitForExitAsync(); }
+            await errors;
+        }
+        return process.ExitCode == 0;
+    }
+
     public Task NormalizeCompressedAsync(string source, string destination, CancellationToken cancellationToken) =>
         _activity.RunAsync(Path.GetFileName(source), MediaStage.Converting, async operation =>
         {
