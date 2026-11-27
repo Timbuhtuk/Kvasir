@@ -101,7 +101,7 @@ cd Kvasir
 .\scripts\download-dependencies.ps1 -FfmpegUrl "https://example.com/ffmpeg.zip"
 ```
 
-При первом запуске приложение создаёт `%LOCALAPPDATA%\Kvasir\configuration.json` из встроенного шаблона. Откройте его через настройки пульта и один раз укажите токен:
+При первом запуске приложение создаёт `%LOCALAPPDATA%\Kvasir\configuration.json` из встроенного шаблона. Введите токен в окне пульта. При ручной настройке укажите его в массиве `tokens`.
 
 ```json
 "tokens": ["YOUR_DISCORD_BOT_TOKEN"]
@@ -164,7 +164,7 @@ dotnet publish src/Kvasir.Desktop/Kvasir.Desktop.csproj -c Release -r win-x64 --
 
 Теги вида `v*` запускают GitHub Actions. Workflow проверяет и публикует для Windows x64 один EXE и ZIP.
 
-Скачайте `Kvasir-v<версия>-win-x64.exe` для запуска одним файлом. При первом запуске .NET извлечёт встроенные компоненты в пользовательский кэш. Для запуска из ZIP распакуйте архив и откройте `Kvasir.Desktop.exe`. В обоих вариантах пользовательская конфигурация, база и настройки хранятся в `%LOCALAPPDATA%\Kvasir`.
+Скачайте `Kvasir-v<версия>-win-x64.exe` для запуска одним файлом. При первом запуске .NET извлечёт встроенные компоненты в пользовательский кэш. Для запуска из ZIP распакуйте архив и откройте `Kvasir.Desktop.exe`. По умолчанию пользовательская конфигурация, база и настройки хранятся в `%LOCALAPPDATA%\Kvasir`. Путь можно изменить в настройках пульта.
 
 ## Безопасность
 
